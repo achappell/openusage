@@ -159,30 +159,30 @@ const installData = [
 const resourceCards = [
   {
     id: "comparison",
-    eyebrow: "Decision page",
+    eyebrow: "Comparison",
     title: "OpenUsage.sh vs OpenUsage.ai",
-    description: "Use the direct comparison when the choice is terminal-first mixed-tool monitoring versus a simpler macOS menu bar limits tracker.",
+    description: "What's the difference. Short answer: different tools, different jobs.",
     href: "/docs/openusage-sh-vs-openusage-ai/",
   },
   {
     id: "matrix",
-    eyebrow: "Proof page",
+    eyebrow: "What it tracks",
     title: "Capability matrix",
-    description: "See the concrete coverage for quotas, resets, rate limits, spend, model usage, daemon-backed history, hooks, and analytics views.",
+    description: "What it actually tracks, provider by provider. No marketing.",
     href: "/docs/capability-matrix/",
   },
   {
     id: "local-quota",
-    eyebrow: "Exact answer",
+    eyebrow: "Quick guide",
     title: "Local quota tracker",
-    description: "The shortest answer for people searching for one local dashboard across Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter.",
+    description: "The short version, if you found us by searching for \"Claude Code quota tracker\" or similar.",
     href: "/local-quota-tracker-for-claude-code-codex-cursor/",
   },
   {
     id: "query-guides",
-    eyebrow: "Docs hub",
-    title: "Docs and query guides",
-    description: "Browse the docs hub for Claude Code, Codex CLI, Cursor, terminal dashboard, and mixed-provider usage questions.",
+    eyebrow: "Docs",
+    title: "Docs and guides",
+    description: "Per-tool guides for Claude Code, Codex, Cursor, OpenRouter, and the rest.",
     href: "/docs/",
   },
 ];
@@ -286,20 +286,16 @@ export default function App() {
         <div className="w" style={{ textAlign: 'left' }}>
           <R><Banner className="banner" /></R>
           <R delay={0.15}>
-            <p className="hero__eyebrow">OpenUsage.sh • Terminal-first • Local-first • 17 providers</p>
+            <p className="hero__eyebrow">Open source · Runs locally · Sixteen-ish providers and counting</p>
           </R>
           <R delay={0.2}>
             <h1 className="hero__title">
-              OpenUsage.sh is the terminal-first local dashboard for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter.
+              The dashboard your AI tools forgot to build.
             </h1>
           </R>
           <R delay={0.3}>
             <p className="hero__sub">
-              OpenUsage.sh is a terminal-first, local-first dashboard for mixed-tool workflows across
-              Claude Code, Codex, Cursor, Copilot, Gemini CLI, OpenRouter, OpenAI, Anthropic, and more.
-              It unifies quotas, resets, rate limits, spend, model usage, and supported session telemetry
-              in one place instead of leaving them fragmented across provider dashboards. If you only need
-              a single-surface countdown, that is a narrower category than the mixed-tool workflow this product is built for.
+              Track spend, quotas, and rate limits across the AI coding tools you actually use. Runs locally, in your terminal.
             </p>
           </R>
           <R delay={0.4}>
@@ -315,11 +311,11 @@ export default function App() {
       <section className="pitch">
         <div className="w">
           <R as="p" className="pitch__line">
-            <em>Built for</em> developers who use more than one coding agent side by side.
+            <em>Made for</em> people who run more than one coding agent at a time.
           </R>
           <R className="pitch__line" delay={0.12}>
             <p className="pitch__line" style={{margin:0}}>
-              Shows <em>quotas, resets, rate limits, spend,</em> and <em>model usage</em> in one place.
+              <em>Spend, quotas, rate limits, model usage.</em> One screen.
             </p>
           </R>
           <R className="pitch__line" delay={0.24}>
@@ -350,9 +346,9 @@ export default function App() {
         <div className="w">
           <R>
             <div className="prov-header">
-              <h2 className="prov-header__title">17 providers</h2>
+              <h2 className="prov-header__title">Providers, and counting</h2>
               <p className="prov-header__sub">
-                Coding agents, API platforms, and local runtimes.<br />One place to watch them all.
+                Coding agents, API platforms, local runtimes. All in one place.
               </p>
             </div>
           </R>
@@ -382,6 +378,27 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          <R delay={0.1}>
+            <p className="prov-contribute" style={{ marginTop: '2.5rem', textAlign: 'center', color: 'var(--text-2)', fontSize: '0.95rem' }}>
+              Yours missing?{' '}
+              <a
+                href="https://github.com/janekbaraniewski/openusage/issues/new"
+                rel="noreferrer"
+                target="_blank"
+                onClick={() => trackOutbound("github-issue", "providers")}
+                style={{ color: 'inherit', textDecoration: 'underline' }}
+              >Open an issue</a>
+              {' '}or{' '}
+              <a
+                href="https://github.com/janekbaraniewski/openusage/pulls"
+                rel="noreferrer"
+                target="_blank"
+                onClick={() => trackOutbound("github-pr", "providers")}
+                style={{ color: 'inherit', textDecoration: 'underline' }}
+              >send a PR</a>.
+            </p>
+          </R>
         </div>
       </section>
 
@@ -404,45 +421,43 @@ export default function App() {
               />
             </div>
           </R>
-          <R><p className="demo__caption">OpenUsage running alongside OpenCode monitoring live OpenRouter usage.</p></R>
+          <R><p className="demo__caption">OpenUsage next to OpenCode, watching OpenRouter spend live.</p></R>
         </div>
       </section>
 
       {/* ── Features (keyword-rich, 2-col grid) ─────────── */}
       <section className="features-section" id="features">
         <div className="w">
-          <R><h2 className="features-title">What OpenUsage Is For</h2></R>
+          <R><h2 className="features-title">What it does</h2></R>
           <R delay={0.05}>
             <p className="features-lede">
-              OpenUsage is for developers who need one local dashboard across more than one coding
-              agent or provider. The job is not “show me one quota.” The job is “show me the real
-              picture across the tools I actually use.”
+              If you only use one coding agent, you don't need this. If you use two or more, you've probably got five tabs open trying to figure out where your money went. That's the problem we solve.
             </p>
           </R>
           <div className="features-grid">
             <R><div className="feature-item">
               <h3>One place across providers</h3>
-              <p>Track coding agents, API platforms, and local runtimes together instead of checking each provider dashboard one by one.</p>
+              <p>Coding agents, API platforms, and local runtimes side by side. No more cycling through provider dashboards.</p>
             </div></R>
             <R delay={0.06}><div className="feature-item">
-              <h3>Quotas, resets, and limits together</h3>
-              <p>See spend, remaining credits, resets, rate limits, and model activity in one view wherever the source exposes them.</p>
+              <h3>Quotas, spend, and limits in one view</h3>
+              <p>Remaining credits, reset windows, rate limits, and model breakdowns where the provider exposes them.</p>
             </div></R>
             <R delay={0.12}><div className="feature-item">
-              <h3>Built for end-user tool tracking</h3>
-              <p>OpenUsage is for developers tracking their actual coding-agent stack, not for instrumenting a separate AI application with tracing SDKs.</p>
+              <h3>Made for the tools, not the SDK</h3>
+              <p>This is for monitoring the AI tools you use to write code. It's not a tracing SDK for the AI app you're building.</p>
             </div></R>
             <R delay={0.18}><div className="feature-item">
-              <h3>Local-first by default</h3>
-              <p>No hosted observability plane required. Keep the dashboard beside the tools you use and store history locally in SQLite.</p>
+              <h3>Local by default</h3>
+              <p>No hosted observability plane. The dashboard runs on your machine. History sits in a SQLite file you own.</p>
             </div></R>
             <R delay={0.24}><div className="feature-item">
-              <h3>More than billing</h3>
-              <p>OpenUsage goes past raw spend with model breakdowns, session activity, MCP usage, code stats, and daemon-backed history where supported.</p>
+              <h3>Beyond the bill</h3>
+              <p>Model breakdowns, session activity, MCP usage, code stats, and daemon-backed history. Where providers expose it.</p>
             </div></R>
             <R delay={0.30}><div className="feature-item">
-              <h3>Proof over positioning</h3>
-              <p>Seventeen providers, live dashboard views, supported hook integrations, and historical telemetry make the claim defensible.</p>
+              <h3>Open source, growing</h3>
+              <p>A long list of supported providers, more every release. Yours missing? Open an issue or send a PR.</p>
             </div></R>
           </div>
         </div>
@@ -450,13 +465,7 @@ export default function App() {
 
       <section className="resources-section" id="resources">
         <div className="w">
-          <R><h2 className="resources-title">Pick The Right Page</h2></R>
-          <R delay={0.05}>
-            <p className="resources-lede">
-              Use the homepage for the product. Use the docs pages for direct comparisons,
-              capability proof, and narrower query matches.
-            </p>
-          </R>
+          <R><h2 className="resources-title">More reading</h2></R>
           <div className="resources-grid">
             {resourceCards.map((card, i) => (
               <R key={card.id} delay={i * 0.06}>
@@ -490,7 +499,7 @@ export default function App() {
               />
             </div>
           </R>
-          <R><p className="demo__caption">Settings modal — layout, graphs, thresholds, and live preview</p></R>
+          <R><p className="demo__caption">Settings modal. Layout, graphs, thresholds, live preview.</p></R>
         </div>
       </section>
 
@@ -501,9 +510,7 @@ export default function App() {
             <div className="install-header">
               <h2 className="install-title">Get started</h2>
               <p className="install-desc">
-                Install it, run <code>openusage</code>, and let auto-detection pick up supported
-                tools and common API key env vars. The point is simple: one dashboard for the mixed
-                coding-agent stack you already have, not another SaaS panel to wire up.
+                Install, run <code>openusage</code>, that's it. Auto-detection finds your installed tools and common API key env vars on its own.
               </p>
             </div>
           </R>
@@ -525,7 +532,7 @@ export default function App() {
           </div>
 
           <R delay={0.2}>
-            <p className="install-run">Then just run <code>openusage</code></p>
+            <p className="install-run">Then run <code>openusage</code></p>
           </R>
         </div>
       </section>
@@ -551,8 +558,7 @@ export default function App() {
       {showConsentBanner ? (
         <div className="consent-banner" role="dialog" aria-live="polite" aria-label="Analytics preference">
           <p className="consent-banner__text">
-            Allow privacy-respecting analytics so we can see pageviews, GitHub clicks, and install intent.
-            You can change this later from the footer.
+            We'd like to count pageviews and clicks (no personal data, no extra cookies). Cool with you? You can flip this later from the footer.
           </p>
           <div className="consent-banner__actions">
             <button className="consent-banner__button consent-banner__button--primary" type="button" onClick={acceptTracking}>
