@@ -95,7 +95,7 @@ func New() *Provider {
 			},
 			Dashboard: dashboardWidget(),
 		}),
-		clock:                 core.SystemClock{},
+		clock:        core.SystemClock{},
 		accountCache: make(map[string]cachedAccountState),
 	}
 }

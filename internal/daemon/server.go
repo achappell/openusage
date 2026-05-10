@@ -115,14 +115,14 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	}
 
 	svc := &Service{
-		cfg:            cfg,
-		ctx:            ctx,
-		store:          store,
-		pipeline:       telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
-		quotaIngest:    telemetry.NewQuotaSnapshotIngestor(store),
-		providerByID:   providersByID(),
-		logThrottle:    core.NewLogThrottle(200, 10*time.Minute),
-		rmCache:        newReadModelCache(),
+		cfg:           cfg,
+		ctx:           ctx,
+		store:         store,
+		pipeline:      telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
+		quotaIngest:   telemetry.NewQuotaSnapshotIngestor(store),
+		providerByID:  providersByID(),
+		logThrottle:   core.NewLogThrottle(200, 10*time.Minute),
+		rmCache:       newReadModelCache(),
 		pollScheduler: newPollScheduler(cfg.PollInterval),
 		pollState:     make(map[string]*providerPollState),
 		clock:         core.SystemClock{},

@@ -153,14 +153,14 @@ type activityAggregates struct {
 	endpoints        map[string]struct{}
 	activeDays       map[string]struct{}
 
-	totalCost, totalByok, totalRequests             float64
-	totalInput, totalOutput, totalReasoning         float64
-	totalCached, totalTokens                        float64
-	cost7d, byok7d, requests7d                      float64
-	input7d, output7d, reasoning7d, cached7d        float64
-	tokens7d                                        float64
-	todayByok, cost7dByok, cost30dByok              float64
-	minDate, maxDate                                string
+	totalCost, totalByok, totalRequests      float64
+	totalInput, totalOutput, totalReasoning  float64
+	totalCached, totalTokens                 float64
+	cost7d, byok7d, requests7d               float64
+	input7d, output7d, reasoning7d, cached7d float64
+	tokens7d                                 float64
+	todayByok, cost7dByok, cost30dByok       float64
+	minDate, maxDate                         string
 }
 
 func newActivityAggregates() *activityAggregates {
