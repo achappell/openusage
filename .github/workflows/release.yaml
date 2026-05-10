@@ -84,6 +84,9 @@ jobs:
             -X 'github.com/janekbaraniewski/openusage/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
             -o dist/openusage_darwin_arm64 ./cmd/openusage
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
       - name: Create macOS archives
         run: |
           VERSION=${{ steps.version.outputs.version }}
@@ -103,6 +106,18 @@ jobs:
           [ -f ../README* ] && cp ../README* openusage_${VERSION}_darwin_arm64/ || true
           tar czf openusage_${VERSION}_darwin_arm64.tar.gz openusage_${VERSION}_darwin_arm64
 
+      - name: Sign macOS archives with cosign (keyless)
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          cd dist
+          for arch in amd64 arm64; do
+            archive="openusage_${VERSION}_darwin_${arch}.tar.gz"
+            cosign sign-blob --yes \
+              --output-signature   "${archive}.sig" \
+              --output-certificate "${archive}.pem" \
+              "${archive}"
+          done
+
       - name: Upload macOS binaries to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -111,7 +126,11 @@ jobs:
           chmod +x scripts/install.sh
           gh release upload "${GITHUB_REF_NAME}" \
             dist/openusage_${VERSION}_darwin_amd64.tar.gz \
+            dist/openusage_${VERSION}_darwin_amd64.tar.gz.sig \
+            dist/openusage_${VERSION}_darwin_amd64.tar.gz.pem \
             dist/openusage_${VERSION}_darwin_arm64.tar.gz \
+            dist/openusage_${VERSION}_darwin_arm64.tar.gz.sig \
+            dist/openusage_${VERSION}_darwin_arm64.tar.gz.pem \
             scripts/install.sh \
             --clobber
 

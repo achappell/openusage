@@ -47,14 +47,18 @@ We also add **grouping** so that `@docusaurus/*` patch+minor bumps come as a sin
 
 ### 2. Dependabot auto-merge workflow
 
-Approach: a small workflow listens for Dependabot PRs, reads metadata via `dependabot/fetch-metadata@v2`, and:
+Approach: every Dependabot PR is auto-approved and gets squash auto-merge enabled. Branch protection on `main` enforces that every required check must pass before the squash actually fires. If CI fails, the PR sits open for human attention — no force-merging.
 
-- For **patch updates** of any ecosystem: enable squash auto-merge
-- For **minor updates** of dev/build dependencies: enable squash auto-merge
-- For **minor updates** of runtime dependencies: leave for human review
-- For **major updates**: leave for human review
+CI is the safety net. We trust that:
 
-The actual merge fires only after every required CI check passes. If a check fails, the PR sits open for human attention — no force-merging.
+- `go test -race`, `golangci-lint`, and `vet` catch behavioral regressions
+- `govulncheck` catches reachable CVEs introduced by the bump
+- The Dependency Review action blocks PRs that introduce vulnerable transitive deps
+- The Docusaurus build catches anything that breaks docs tooling
+
+If those gates pass, the bump is safe to ship. The cost of human review on every patch update is higher than the residual risk this leaves.
+
+**This requires branch protection on `main` with required status checks.** Without it, `gh pr merge --auto` merges as soon as nothing is blocking — which is "immediately" if nothing's required.
 
 We use the **native GitHub auto-merge** (via `gh pr merge --auto`) instead of a third-party action. Cleaner, no extra permissions to grant.
 
