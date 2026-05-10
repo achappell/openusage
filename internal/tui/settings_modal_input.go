@@ -64,293 +64,32 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.settings.tab {
 	case settingsTabProviders:
-		switch msg.String() {
-		case "up", "k":
-			if m.settings.cursor > 0 {
-				m.settings.cursor--
-			}
-		case "down", "j":
-			if m.settings.cursor < len(ids)-1 {
-				m.settings.cursor++
-			}
-		case "K", "shift+k", "shift+up", "ctrl+up", "alt+up":
-			cmd := m.moveSelectedProvider(ids, -1)
-			if cmd != nil {
-				return m, cmd
-			}
-		case "J", "shift+j", "shift+down", "ctrl+down", "alt+down":
-			cmd := m.moveSelectedProvider(ids, 1)
-			if cmd != nil {
-				return m, cmd
-			}
-		case " ", "enter":
-			if len(ids) == 0 {
-				return m, nil
-			}
-			id := ids[clamp(m.settings.cursor, 0, len(ids)-1)]
-			m.providerEnabled[id] = !m.isProviderEnabled(id)
-			m.rebuildSortedIDs()
-			m.settings.status = "saving settings..."
-			return m, m.persistDashboardPrefsCmd()
+		if next, cmd, handled := m.handleSettingsTabProvidersKey(msg, ids); handled {
+			return next, cmd
 		}
 	case settingsTabWidgetSections:
-		switch msg.String() {
-		case "<", ">":
-			// Switch sub-tab between tile (0) and detail (1) sections.
-			if msg.String() == "<" {
-				if m.settings.sectionSubTab > 0 {
-					m.settings.sectionSubTab--
-				}
-			} else {
-				if m.settings.sectionSubTab < 1 {
-					m.settings.sectionSubTab++
-				}
-			}
-			m.settings.sectionRowCursor = 0
-			m.settings.previewOffset = 0
-			return m, nil
-		case "up", "k":
-			if m.settings.sectionSubTab == 1 {
-				if m.settings.sectionRowCursor > 0 {
-					m.settings.sectionRowCursor--
-				}
-			} else {
-				if m.settings.sectionRowCursor > 0 {
-					m.settings.sectionRowCursor--
-				}
-			}
-		case "down", "j":
-			if m.settings.sectionSubTab == 1 {
-				entries := m.detailWidgetSectionEntries()
-				if m.settings.sectionRowCursor < len(entries)-1 {
-					m.settings.sectionRowCursor++
-				}
-			} else {
-				entries := m.widgetSectionEntries()
-				if m.settings.sectionRowCursor < len(entries)-1 {
-					m.settings.sectionRowCursor++
-				}
-			}
-		case "K", "shift+k", "shift+up", "ctrl+up", "alt+up":
-			if m.settings.sectionSubTab == 1 {
-				cmd := m.moveSelectedDetailSection(-1)
-				if cmd != nil {
-					return m, cmd
-				}
-			} else {
-				cmd := m.moveSelectedWidgetSection(-1)
-				if cmd != nil {
-					return m, cmd
-				}
-			}
-		case "J", "shift+j", "shift+down", "ctrl+down", "alt+down":
-			if m.settings.sectionSubTab == 1 {
-				cmd := m.moveSelectedDetailSection(1)
-				if cmd != nil {
-					return m, cmd
-				}
-			} else {
-				cmd := m.moveSelectedWidgetSection(1)
-				if cmd != nil {
-					return m, cmd
-				}
-			}
-		case " ", "enter":
-			if m.settings.sectionSubTab == 1 {
-				cmd := m.toggleSelectedDetailSection()
-				if cmd != nil {
-					return m, cmd
-				}
-			} else {
-				cmd := m.toggleSelectedWidgetSection()
-				if cmd != nil {
-					return m, cmd
-				}
-			}
-		case "h", "H":
-			m.hideSectionsWithNoData = !m.hideSectionsWithNoData
-			m.invalidateTileBodyCache()
-			m.settings.status = "saving empty-state..."
-			return m, m.persistDashboardHideSectionsWithNoDataCmd()
-		case "pgup", "ctrl+u":
-			m.settings.previewOffset -= 4
-			if m.settings.previewOffset < 0 {
-				m.settings.previewOffset = 0
-			}
-		case "pgdown", "ctrl+d":
-			m.settings.previewOffset += 4
+		if next, cmd, handled := m.handleSettingsTabWidgetSectionsKey(msg); handled {
+			return next, cmd
 		}
 	case settingsTabTheme:
-		themes := AvailableThemes()
-		switch msg.String() {
-		case "up", "k":
-			if m.settings.themeCursor > 0 {
-				m.settings.themeCursor--
-			}
-		case "down", "j":
-			if m.settings.themeCursor < len(themes)-1 {
-				m.settings.themeCursor++
-			}
-		case " ", "enter":
-			if len(themes) == 0 {
-				return m, nil
-			}
-			m.settings.themeCursor = clamp(m.settings.themeCursor, 0, len(themes)-1)
-			name := themes[m.settings.themeCursor].Name
-			if SetThemeByName(name) {
-				m.invalidateRenderCaches()
-				m.settings.status = "saving theme..."
-				return m, m.persistThemeCmd(name)
-			}
+		if next, cmd, handled := m.handleSettingsTabThemeKey(msg); handled {
+			return next, cmd
 		}
 	case settingsTabView:
-		switch msg.String() {
-		case "up", "k":
-			if m.settings.viewCursor > 0 {
-				m.settings.viewCursor--
-			}
-		case "down", "j":
-			if m.settings.viewCursor < len(dashboardViewOptions)-1 {
-				m.settings.viewCursor++
-			}
-		case " ", "enter":
-			if len(dashboardViewOptions) == 0 {
-				return m, nil
-			}
-			selected := dashboardViewByIndex(m.settings.viewCursor)
-			m.setDashboardView(selected)
-			m.settings.viewCursor = dashboardViewIndex(selected)
-			m.settings.status = "saving view..."
-			return m, m.persistDashboardViewCmd()
+		if next, cmd, handled := m.handleSettingsTabViewKey(msg); handled {
+			return next, cmd
 		}
 	case settingsTabAPIKeys:
-		switch msg.String() {
-		case "up", "k":
-			if m.settings.cursor > 0 {
-				m.settings.cursor--
-			}
-		case "down", "j":
-			if m.settings.cursor < len(ids)-1 {
-				m.settings.cursor++
-			}
-		case "enter":
-			if len(ids) == 0 {
-				return m, nil
-			}
-			m.settings.cursor = clamp(m.settings.cursor, 0, len(ids)-1)
-			id := ids[m.settings.cursor]
-			providerID := providerForAccountID(id, m.accountProviders)
-			if isBrowserSessionProvider(providerID) {
-				return m.startBrowserSessionConnect(id, providerID)
-			}
-			m.settings.apiKeyEditing = true
-			m.settings.apiKeyEditAccountID = id
-			m.settings.apiKeyInput = ""
-			m.settings.apiKeyStatus = ""
-			return m, nil
-		case "c":
-			if len(ids) == 0 {
-				return m, nil
-			}
-			m.settings.cursor = clamp(m.settings.cursor, 0, len(ids)-1)
-			id := ids[m.settings.cursor]
-			providerID := providerForAccountID(id, m.accountProviders)
-			if !supportsBrowserSessionProvider(providerID) {
-				return m, nil
-			}
-			return m.startBrowserSessionConnect(id, providerID)
-		case "b":
-			// Open the provider's console URL in the user's default browser.
-			// Only meaningful for browser-session-auth providers — but
-			// harmless on api-key rows (no console URL = no-op).
-			if len(ids) == 0 {
-				return m, nil
-			}
-			m.settings.cursor = clamp(m.settings.cursor, 0, len(ids)-1)
-			id := ids[m.settings.cursor]
-			providerID := providerForAccountID(id, m.accountProviders)
-			if !supportsBrowserSessionProvider(providerID) {
-				return m, nil
-			}
-			_, _, consoleURL := browserCookieRefForProvider(providerID)
-			if consoleURL == "" {
-				return m, nil
-			}
-			m.settings.apiKeyStatus = "opening " + consoleURL + "…"
-			return m, m.openProviderConsoleCmd(consoleURL)
-		case "x":
-			// Disconnect the stored browser session for the current row.
-			// Distinct from "d" / "backspace" (api-key delete) because the
-			// underlying credential store entry is in Sessions, not Keys.
-			if len(ids) == 0 {
-				return m, nil
-			}
-			m.settings.cursor = clamp(m.settings.cursor, 0, len(ids)-1)
-			id := ids[m.settings.cursor]
-			providerID := providerForAccountID(id, m.accountProviders)
-			if !supportsBrowserSessionProvider(providerID) {
-				return m, nil
-			}
-			m.settings.apiKeyStatus = "disconnecting..."
-			return m, m.disconnectBrowserSessionCmd(id)
-		case "d", "backspace":
-			if len(ids) == 0 {
-				return m, nil
-			}
-			m.settings.cursor = clamp(m.settings.cursor, 0, len(ids)-1)
-			id := ids[m.settings.cursor]
-			providerID := providerForAccountID(id, m.accountProviders)
-			if !isAPIKeyProvider(providerID) {
-				return m, nil
-			}
-			m.settings.apiKeyStatus = "deleting..."
-			return m, m.deleteCredentialCmd(id)
+		if next, cmd, handled := m.handleSettingsTabAPIKeysKey(msg, ids); handled {
+			return next, cmd
 		}
 	case settingsTabTelemetry:
-		rows := m.telemetryRows()
-		switch msg.String() {
-		case "up", "k":
-			if m.settings.cursor > 0 {
-				m.settings.cursor--
-			}
-		case "down", "j":
-			if m.settings.cursor < len(rows)-1 {
-				m.settings.cursor++
-			}
-		case "w":
-			if next, cmd, handled := m.applyTimeWindowAtCursor(rows); handled {
-				return next, cmd
-			}
-		case " ", "enter":
-			if next, cmd, handled := m.activateTelemetryRow(rows); handled {
-				return next, cmd
-			}
-		case "m":
-			if next, cmd, handled := m.openProviderLinkPickerAtCursor(rows); handled {
-				return next, cmd
-			}
-		case "x":
-			if next, cmd, handled := m.clearProviderLinkAtCursor(rows); handled {
-				return next, cmd
-			}
+		if next, cmd, handled := m.handleSettingsTabTelemetryKey(msg); handled {
+			return next, cmd
 		}
 	case settingsTabIntegrations:
-		switch msg.String() {
-		case "up", "k":
-			if m.settings.cursor > 0 {
-				m.settings.cursor--
-			}
-		case "down", "j":
-			if m.settings.cursor < len(m.settings.integrationStatus)-1 {
-				m.settings.cursor++
-			}
-		case " ", "enter":
-			if len(m.settings.integrationStatus) == 0 {
-				return m, nil
-			}
-			selected := m.settings.integrationStatus[clamp(m.settings.cursor, 0, len(m.settings.integrationStatus)-1)]
-			m.settings.status = "installing integration..."
-			return m, m.installIntegrationCmd(selected.ID)
+		if next, cmd, handled := m.handleSettingsTabIntegrationsKey(msg); handled {
+			return next, cmd
 		}
 	}
 
