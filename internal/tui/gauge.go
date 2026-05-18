@@ -102,6 +102,11 @@ func RenderUsageGauge(usedPercent float64, width int, warnThresh, critThresh flo
 //   - usedPercent >= 100 (already at limit, projection is meaningless)
 //
 // If only one of {reset, projection} is meaningful, only that piece renders.
+//
+// When the projected time to 100% exceeds the time remaining in the window,
+// the projection half switches from "projected 100% in X" to "projected
+// ~N% by reset", where N is the linearly extrapolated percent at reset
+// (capped at 99 so the wording never contradicts the branch).
 func RenderUsageGaugeWithProjection(usedPercent float64, width int, warnThresh, critThresh float64, paceFraction float64, resetIn time.Duration) string {
 	gauge := RenderUsageGauge(usedPercent, width, warnThresh, critThresh)
 
@@ -120,7 +125,24 @@ func RenderUsageGaugeWithProjection(usedPercent float64, width int, warnThresh, 
 			minutesTo100 := remainingPct / pctPerMinute
 			d := time.Duration(minutesTo100 * float64(time.Minute))
 			if d > 0 {
-				projPart = "projected 100% in " + formatDurationShort(d)
+				// If the window will reset before we project hitting 100%,
+				// show the projected percent at reset instead of an
+				// impossible "100% in X" claim that overshoots the window.
+				if resetIn > 0 && d > resetIn {
+					projectedPct := usedPercent + pctPerMinute*resetIn.Minutes()
+					n := int(math.Round(projectedPct))
+					if n < 0 {
+						n = 0
+					}
+					// Cap below 100 so this branch never contradicts itself
+					// by claiming the projection somehow lands at 100%.
+					if n >= 100 {
+						n = 99
+					}
+					projPart = fmt.Sprintf("projected ~%d%% by reset", n)
+				} else {
+					projPart = "projected 100% in " + formatDurationShort(d)
+				}
 			}
 		}
 	}

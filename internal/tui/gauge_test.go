@@ -28,9 +28,45 @@ func TestRenderUsageGaugeWithProjection(t *testing.T) {
 		{
 			name:         "happy_path",
 			usedPercent:  usedPercent,
-			paceFraction: 0.01,
+			paceFraction: 0.05, // 5%/min → 100% in 10m, well inside the 30m window
 			resetIn:      resetIn,
-			wantContains: []string{"resets in", "projected"},
+			wantContains:   []string{"resets in", "projected 100% in"},
+			wantNotContain: []string{"by reset"},
+		},
+		{
+			// Pace would overshoot the window: 1%/min, 50% remaining → 50m to
+			// 100%, but only 30m to reset. Should switch to "~N% by reset".
+			name:           "overshoots_window",
+			usedPercent:    usedPercent,
+			paceFraction:   0.01,
+			resetIn:        resetIn,
+			wantContains:   []string{"resets in", "projected ~80% by reset"},
+			wantNotContain: []string{"100% in"},
+		},
+		{
+			// Pace exactly hits reset: 50% used, 50% remaining, 1%/min,
+			// 50m to 100%, resetIn=50m → projected time == reset time, so
+			// we keep the "100% in" wording (only > triggers the switch).
+			name:           "projection_equals_reset",
+			usedPercent:    usedPercent,
+			paceFraction:   0.01,
+			resetIn:        50 * time.Minute,
+			wantContains:   []string{"resets in", "projected 100% in"},
+			wantNotContain: []string{"by reset"},
+		},
+		{
+			// Edge case: projected % at reset rounds up to 100, but the
+			// branch should never claim "~100% by reset" (it would
+			// contradict why we picked this branch in the first place).
+			// minutesTo100 = 90/1.499 ≈ 60.04m > resetIn (60m) → branch
+			// taken; projectedPct = 10 + 1.499*60 = 99.94 → rounds to 100
+			// → capped to 99.
+			name:           "by_reset_caps_below_100",
+			usedPercent:    10.0,
+			paceFraction:   0.01499,
+			resetIn:        60 * time.Minute,
+			wantContains:   []string{"resets in", "projected ~99% by reset"},
+			wantNotContain: []string{"~100%", "100% in"},
 		},
 		{
 			name:           "nan_pace",
