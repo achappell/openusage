@@ -51,6 +51,7 @@ func AutoDetect() Result {
 	detectGeminiCLI(&result)
 	detectAmp(&result)
 	detectGoose(&result)
+	detectHermes(&result)
 	detectCrush(&result)
 	detectRooCode(&result)
 	detectKiloCode(&result)
