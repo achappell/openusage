@@ -1,0 +1,26 @@
+[
+  {
+    "entry_type": "say",
+    "say": "api_req_started",
+    "ts": 1716033600000,
+    "text": "{\"cost\":0.0123,\"tokensIn\":1000,\"tokensOut\":500,\"cacheReads\":200,\"cacheWrites\":100,\"apiProtocol\":\"anthropic\",\"request\":\"...\"}"
+  },
+  {
+    "entry_type": "say",
+    "say": "api_req_started",
+    "ts": 1716120000000,
+    "text": "{\"cost\":0.0456,\"tokensIn\":2000,\"tokensOut\":1000,\"cacheReads\":400,\"cacheWrites\":0,\"apiProtocol\":\"bedrock/anthropic\"}"
+  },
+  {
+    "entry_type": "say",
+    "say": "user_input",
+    "ts": 1716120010000,
+    "text": "hello"
+  },
+  {
+    "entry_type": "say",
+    "say": "api_req_started",
+    "ts": 1716120020000,
+    "text": "not-json-on-purpose"
+  }
+]

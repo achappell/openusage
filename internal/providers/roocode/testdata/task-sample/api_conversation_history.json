@@ -1,0 +1,14 @@
+[
+  {
+    "role": "user",
+    "content": "<environment_details>\n<model>claude-opus-4-1</model>\n<slug>claude-opus-4-1-20250805</slug>\n<name>Claude Opus 4.1</name>\n</environment_details>\nHello"
+  },
+  {
+    "role": "assistant",
+    "content": "Hi"
+  },
+  {
+    "role": "user",
+    "content": "<environment_details>\n<model>claude-sonnet-4-5</model>\n<slug>claude-sonnet-4-5-20250929</slug>\n<name>Claude Sonnet 4.5</name>\n</environment_details>\nNext"
+  }
+]
