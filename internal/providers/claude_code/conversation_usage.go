@@ -130,8 +130,14 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		}
 		return m[key]
 	}
-	normalizeAgent := func(path string) string {
-		if strings.Contains(path, string(filepath.Separator)+"subagents"+string(filepath.Separator)) {
+	normalizeAgent := func(record conversationRecord) string {
+		// Prefer the agent attribution resolved at parse time by the three-tier
+		// detector. Empty values are coerced to the legacy "main"/"subagents"
+		// labels so older fixtures continue to look the same.
+		if label := strings.TrimSpace(record.agentID); label != "" {
+			return label
+		}
+		if strings.Contains(record.sourcePath, string(filepath.Separator)+"subagents"+string(filepath.Separator)) {
 			return "subagents"
 		}
 		return "main"
@@ -245,7 +251,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		clientID := projectID
 		clientTotalsEntry := ensureTotals(clientTotals, clientID)
 		projectTotalsEntry := ensureTotals(projectTotals, projectID)
-		agentID := normalizeAgent(u.sourcePath)
+		agentID := normalizeAgent(u)
 		agentTotalsEntry := ensureTotals(agentTotals, agentID)
 
 		if u.sessionID != "" {
