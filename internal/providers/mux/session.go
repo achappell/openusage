@@ -13,9 +13,9 @@ import (
 // under ~/.mux/sessions/<workspaceId>/session-usage.json. Field names follow
 // upstream's camelCase wire format.
 type muxSessionUsage struct {
-	Version     int                        `json:"version"`
-	ByModel     map[string]muxModelUsage   `json:"byModel"`
-	LastRequest *muxLastRequest            `json:"lastRequest,omitempty"`
+	Version     int                      `json:"version"`
+	ByModel     map[string]muxModelUsage `json:"byModel"`
+	LastRequest *muxLastRequest          `json:"lastRequest,omitempty"`
 }
 
 // muxModelUsage tracks per-bucket token + cost for one model.
@@ -39,17 +39,17 @@ type muxLastRequest struct {
 
 // muxModelEntry is the flattened representation we emit downstream.
 type muxModelEntry struct {
-	SessionID  string
-	Provider   string
-	Model      string
-	Input      int64
-	Cached     int64 // cache_read
+	SessionID   string
+	Provider    string
+	Model       string
+	Input       int64
+	Cached      int64 // cache_read
 	CacheCreate int64 // cache_write
-	Output     int64
-	Reasoning  int64
-	CostUSD    float64
-	HasCost    bool
-	Timestamp  time.Time
+	Output      int64
+	Reasoning   int64
+	CostUSD     float64
+	HasCost     bool
+	Timestamp   time.Time
 }
 
 // readMuxSession parses one session-usage.json file and returns flattened

@@ -13,18 +13,18 @@ import (
 // droidSettings mirrors the JSON shape of Droid's per-session settings file
 // at ~/.factory/sessions/<uuid>.settings.json. Upstream uses camelCase keys.
 type droidSettings struct {
-	Model                 string            `json:"model,omitempty"`
-	ProviderLock          string            `json:"providerLock,omitempty"`
-	ProviderLockTimestamp string            `json:"providerLockTimestamp,omitempty"`
-	TokenUsage            *droidTokenUsage  `json:"tokenUsage,omitempty"`
+	Model                 string           `json:"model,omitempty"`
+	ProviderLock          string           `json:"providerLock,omitempty"`
+	ProviderLockTimestamp string           `json:"providerLockTimestamp,omitempty"`
+	TokenUsage            *droidTokenUsage `json:"tokenUsage,omitempty"`
 }
 
 type droidTokenUsage struct {
-	InputTokens          *int64 `json:"inputTokens,omitempty"`
-	OutputTokens         *int64 `json:"outputTokens,omitempty"`
-	CacheCreationTokens  *int64 `json:"cacheCreationTokens,omitempty"`
-	CacheReadTokens      *int64 `json:"cacheReadTokens,omitempty"`
-	ThinkingTokens       *int64 `json:"thinkingTokens,omitempty"`
+	InputTokens         *int64 `json:"inputTokens,omitempty"`
+	OutputTokens        *int64 `json:"outputTokens,omitempty"`
+	CacheCreationTokens *int64 `json:"cacheCreationTokens,omitempty"`
+	CacheReadTokens     *int64 `json:"cacheReadTokens,omitempty"`
+	ThinkingTokens      *int64 `json:"thinkingTokens,omitempty"`
 }
 
 // droidSession is the flattened representation we emit downstream.
@@ -123,7 +123,7 @@ func parseDroidSession(settingsPath string) (*droidSession, error) {
 // prefix, drop `[...]` bracket annotations, lowercase, dots to hyphens,
 // collapse consecutive hyphens.
 //
-//   "custom:Claude-Opus-4.5-Thinking-[Anthropic]-0" -> "claude-opus-4-5-thinking-0"
+//	"custom:Claude-Opus-4.5-Thinking-[Anthropic]-0" -> "claude-opus-4-5-thinking-0"
 func normalizeDroidModel(raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {

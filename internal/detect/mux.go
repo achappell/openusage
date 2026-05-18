@@ -63,4 +63,3 @@ func defaultMuxConfigDir() string {
 	}
 	return filepath.Join(home, ".mux")
 }
-

@@ -54,11 +54,11 @@ const (
 // encoder also strips snapshot Raw maps defensively since they sometimes carry
 // credential hints from provider probes.
 type ExportEnvelope struct {
-	SchemaVersion    string                `json:"schema_version"`
-	GeneratedAt      time.Time             `json:"generated_at"`
-	OpenUsageVersion string                `json:"openusage_version"`
-	Source           Source                `json:"source"`
-	Snapshots        []core.UsageSnapshot  `json:"snapshots"`
+	SchemaVersion    string               `json:"schema_version"`
+	GeneratedAt      time.Time            `json:"generated_at"`
+	OpenUsageVersion string               `json:"openusage_version"`
+	Source           Source               `json:"source"`
+	Snapshots        []core.UsageSnapshot `json:"snapshots"`
 }
 
 // Options captures the parameters parsed from CLI flags. The orchestrator

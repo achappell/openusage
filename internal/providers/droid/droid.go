@@ -284,4 +284,3 @@ func formatCount(v float64, noun string) string {
 	}
 	return shared.FormatTokenCount(int(v)) + " " + noun + "s"
 }
-

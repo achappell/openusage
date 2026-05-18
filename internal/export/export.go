@@ -17,10 +17,10 @@ import (
 
 // runner bundles the orchestration dependencies so tests can swap them out.
 type runner struct {
-	direct *directCollector
-	dmn    *daemonCollector
-	stderr io.Writer
-	now    func() time.Time
+	direct     *directCollector
+	dmn        *daemonCollector
+	stderr     io.Writer
+	now        func() time.Time
 	openOutput func(path string) (io.WriteCloser, error)
 }
 
@@ -47,10 +47,10 @@ func newRunner(opts Options) *runner {
 		return time.Now().UTC()
 	}
 	return &runner{
-		direct: newDirectCollector(),
-		dmn:    newDaemonCollector(daemon.ResolveSocketPath()),
-		stderr: stderr,
-		now:    now,
+		direct:     newDirectCollector(),
+		dmn:        newDaemonCollector(daemon.ResolveSocketPath()),
+		stderr:     stderr,
+		now:        now,
 		openOutput: defaultOpenOutput,
 	}
 }

@@ -48,9 +48,10 @@ func encodeJSON(w io.Writer, env ExportEnvelope) error {
 // — JSON is the canonical export format.
 //
 // Columns:
-//   schema_version, generated_at, openusage_version, source,
-//   provider_id, account_id, snapshot_timestamp, status, message,
-//   metric, used, limit, remaining, unit, window
+//
+//	schema_version, generated_at, openusage_version, source,
+//	provider_id, account_id, snapshot_timestamp, status, message,
+//	metric, used, limit, remaining, unit, window
 func encodeCSV(w io.Writer, env ExportEnvelope) error {
 	buf := bytes.NewBuffer(nil)
 	cw := csv.NewWriter(buf)
