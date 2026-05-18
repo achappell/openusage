@@ -46,6 +46,11 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 	for _, path := range sessionFiles {
 		defaultDay := dayFromSessionPath(path, sessionsDir)
 		sessionClient := "Other"
+		// sessionDefaultModel is the model_id captured from the session header
+		// (or refreshed by a turn_context line); it acts as the fallback when
+		// a token_count event does not carry its own model field. currentModel
+		// is the resolved value used for the immediately-following accounting.
+		sessionDefaultModel := "unknown"
 		currentModel := "unknown"
 		var previous tokenUsage
 		var hasPrevious bool
@@ -54,12 +59,14 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 			switch {
 			case record.SessionMeta != nil:
 				sessionClient = classifyClient(record.SessionMeta.Source, record.SessionMeta.Originator)
-				if record.SessionMeta.Model != "" {
-					currentModel = record.SessionMeta.Model
+				if m := core.FirstNonEmpty(record.SessionMeta.Model, record.SessionMeta.ModelID); m != "" {
+					sessionDefaultModel = m
+					currentModel = m
 				}
 			case record.TurnContext != nil:
-				if strings.TrimSpace(record.TurnContext.Model) != "" {
-					currentModel = record.TurnContext.Model
+				if m := core.FirstNonEmpty(record.TurnContext.Model, record.TurnContext.ModelID); strings.TrimSpace(m) != "" {
+					sessionDefaultModel = m
+					currentModel = m
 				}
 			case record.EventPayload != nil:
 				payload := record.EventPayload
@@ -69,6 +76,14 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 				}
 				if payload.Type != "token_count" || payload.Info == nil {
 					return nil
+				}
+				// Per-message override: when a token_count event carries its
+				// own model, prefer it. Otherwise fall back to the session
+				// default captured from the header / last turn_context.
+				if perEvent := core.FirstNonEmpty(payload.Model, payload.ModelID); perEvent != "" {
+					currentModel = perEvent
+				} else {
+					currentModel = sessionDefaultModel
 				}
 
 				total := payload.Info.TotalTokenUsage

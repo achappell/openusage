@@ -876,6 +876,56 @@ func TestFindLatestSessionFile(t *testing.T) {
 	}
 }
 
+// TestFetchResolvesModelIDFromSessionHeaderAndPerEventOverride verifies the
+// three-layer model_id resolution we expect Codex to perform: a model on the
+// session_meta header is treated as the session default, a turn_context can
+// rotate it, and a per-event token_count carrying its own model overrides the
+// resolved default just for that event.
+func TestFetchResolvesModelIDFromSessionHeaderAndPerEventOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsRoot := filepath.Join(tmpDir, "sessions")
+	dayDir := filepath.Join(sessionsRoot, "2026", "05", "18")
+	if err := os.MkdirAll(dayDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// session_meta carries the global model_id (alternative spelling).
+	// First token_count event has no model: must fall back to the session
+	// default.
+	// Second token_count event carries an explicit `model` field: must override.
+	sessionFile := filepath.Join(dayDir, "rollout-model-id.jsonl")
+	content := `{"timestamp":"2026-05-18T00:00:01Z","type":"session_meta","payload":{"id":"sess-1","source":"cli","originator":"codex_cli_rs","model_id":"gpt-5-codex"}}
+{"timestamp":"2026-05-18T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":80,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":100},"model_context_window":128000}}}
+{"timestamp":"2026-05-18T00:00:03Z","type":"event_msg","payload":{"type":"token_count","model":"gpt-6-preview","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0,"total_tokens":200},"model_context_window":128000}}}
+`
+	if err := os.WriteFile(sessionFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "codex-model-id",
+		Provider: "codex",
+		Auth:     "local",
+		RuntimeHints: map[string]string{
+			"config_dir":   tmpDir,
+			"sessions_dir": sessionsRoot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	// First event credits gpt-5-codex (session default = 100 tokens).
+	if got := metricUsed(t, snap, "model_gpt_5_codex_total_tokens"); got != 100 {
+		t.Fatalf("model_gpt_5_codex_total_tokens = %.1f, want 100", got)
+	}
+	// Second event credits the per-event override gpt-6-preview (delta = 100).
+	if got := metricUsed(t, snap, "model_gpt_6_preview_total_tokens"); got != 100 {
+		t.Fatalf("model_gpt_6_preview_total_tokens = %.1f, want 100", got)
+	}
+}
+
 func metricUsed(t *testing.T, snap core.UsageSnapshot, key string) float64 {
 	t.Helper()
 	metric, ok := snap.Metrics[key]

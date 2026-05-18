@@ -19,6 +19,10 @@ type eventPayload struct {
 	RateLimits *rateLimits `json:"rate_limits,omitempty"`
 	RequestID  string      `json:"request_id,omitempty"`
 	MessageID  string      `json:"message_id,omitempty"`
+	// Model and ModelID let per-event messages override the model_id resolved
+	// from the session header. Codex emits either tag depending on version.
+	Model   string `json:"model,omitempty"`
+	ModelID string `json:"model_id,omitempty"`
 }
 
 type tokenInfo struct {
@@ -36,18 +40,23 @@ type tokenUsage struct {
 }
 
 type sessionMetaPayload struct {
-	ID            string `json:"id,omitempty"`
-	SessionID     string `json:"session_id,omitempty"`
-	Source        string `json:"source,omitempty"`
-	Originator    string `json:"originator,omitempty"`
-	Model         string `json:"model,omitempty"`
+	ID         string `json:"id,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Originator string `json:"originator,omitempty"`
+	Model      string `json:"model,omitempty"`
+	// ModelID is the alternative spelling some Codex versions emit in the
+	// session header. We pick whichever is non-empty when resolving the
+	// session-wide default model.
+	ModelID       string `json:"model_id,omitempty"`
 	CWD           string `json:"cwd,omitempty"`
 	ModelProvider string `json:"model_provider,omitempty"`
 }
 
 type turnContextPayload struct {
-	Model  string `json:"model,omitempty"`
-	TurnID string `json:"turn_id,omitempty"`
+	Model   string `json:"model,omitempty"`
+	ModelID string `json:"model_id,omitempty"`
+	TurnID  string `json:"turn_id,omitempty"`
 }
 
 type sessionLine struct {
