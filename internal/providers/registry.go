@@ -14,6 +14,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/deepseek"
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_api"
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_cli"
+	"github.com/janekbaraniewski/openusage/internal/providers/goose"
 	"github.com/janekbaraniewski/openusage/internal/providers/groq"
 	"github.com/janekbaraniewski/openusage/internal/providers/mistral"
 	"github.com/janekbaraniewski/openusage/internal/providers/moonshot"
@@ -49,6 +50,7 @@ func AllProviders() []core.UsageProvider {
 		claude_code.New(),
 		codex.New(),
 		amp.New(),
+		goose.New(),
 	}
 }
 
