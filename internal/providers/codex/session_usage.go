@@ -28,6 +28,10 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 		Files:   make(map[string]struct{}),
 		Deleted: make(map[string]struct{}),
 	}
+	modelCost := make(map[string]float64)
+	dailyCost := make(map[string]float64)
+	var totalCostUSD float64
+	var todayCostUSD float64
 	today := time.Now().UTC().Format("2006-01-02")
 	totalRequests := 0
 	requestsToday := 0
@@ -102,6 +106,18 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 					requestsToday++
 				}
 
+				cost := estimateUsageCost(currentModel, delta)
+				if cost > 0 {
+					modelCost[modelName] += cost
+					totalCostUSD += cost
+					if day != "" {
+						dailyCost[day] += cost
+					}
+					if day == today {
+						todayCostUSD += cost
+					}
+				}
+
 				if !countedSession {
 					clientSessions[clientName]++
 					countedSession = true
@@ -150,6 +166,7 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 	emitLanguageMetrics(langRequests, snap)
 	emitProductivityMetrics(stats, promptCount, commits, totalRequests, requestsToday, clientSessions, snap)
 	emitDailyUsageSeries(dailyTokenTotals, dailyRequestTotals, interfaceDaily, snap)
+	emitCostMetrics(modelCost, dailyCost, totalCostUSD, todayCostUSD, snap)
 
 	return nil
 }
