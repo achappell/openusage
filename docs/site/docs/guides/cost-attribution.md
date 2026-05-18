@@ -113,5 +113,6 @@ Set it before the data ages out. Then use `w` to cycle to `30d` (or `all`) and t
 
 - [Telemetry pipeline](../concepts/telemetry.md) — how events get deduped.
 - [Time windows](../concepts/time-windows.md) — the semantics of `1d` vs `7d`.
+- [Usage gauge projections](usage-projections.md) — the `projected 100% in …` annotation under windowed gauges.
 - [Multi-account](multi-account.md)
 - [Daemon overview](/daemon) — install hooks and integrations.

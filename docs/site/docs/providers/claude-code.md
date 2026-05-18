@@ -200,3 +200,4 @@ A block starts at `floor(timestamp_of_first_message, 1h)` and ends 5 hours later
 
 - [Codex CLI](./codex.md) — sibling local-file provider for OpenAI's Codex
 - [Anthropic](./anthropic.md) — direct API rate limits for the same backend models
+- [Usage gauge projections](../guides/usage-projections.md) — how the `resets in … · projected 100% in …` annotation under the 5h gauge is computed

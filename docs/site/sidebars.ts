@@ -118,6 +118,7 @@ const sidebars: SidebarsConfig = {
         'guides/multi-account',
         'guides/team-tracking',
         'guides/cost-attribution',
+        'guides/usage-projections',
         'guides/headless-servers',
       ],
     },
