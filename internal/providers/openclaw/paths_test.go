@@ -25,10 +25,11 @@ func TestResolveAgentsDirs_OverrideWins(t *testing.T) {
 	}
 }
 
-func TestResolveAgentsDirs_OverrideMissingReturnsNone(t *testing.T) {
+func TestResolveAgentsDirs_OverrideMissingFallsThroughToDefault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if err := os.MkdirAll(filepath.Join(home, ".openclaw", "agents"), 0o755); err != nil {
+	def := filepath.Join(home, ".openclaw", "agents")
+	if err := os.MkdirAll(def, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -36,8 +37,21 @@ func TestResolveAgentsDirs_OverrideMissingReturnsNone(t *testing.T) {
 	acct.SetPath("agents_dir", filepath.Join(t.TempDir(), "does-not-exist"))
 
 	dirs := resolveAgentsDirs(acct)
+	if len(dirs) != 1 || dirs[0] != def {
+		t.Errorf("dirs = %v, want [%s] (override missing should fall through)", dirs, def)
+	}
+}
+
+func TestResolveAgentsDirs_OverrideMissingNoDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	acct := core.AccountConfig{}
+	acct.SetPath("agents_dir", filepath.Join(t.TempDir(), "does-not-exist"))
+
+	dirs := resolveAgentsDirs(acct)
 	if len(dirs) != 0 {
-		t.Errorf("dirs = %v, want empty when override missing", dirs)
+		t.Errorf("dirs = %v, want empty when override missing and no defaults exist", dirs)
 	}
 }
 

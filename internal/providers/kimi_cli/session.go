@@ -101,7 +101,13 @@ func readKimiWireFileWithModel(path, fallbackModel string) ([]kimiModelEntry, er
 	}
 	defer f.Close()
 
-	sessionID := filepath.Base(filepath.Dir(path))
+	// Layout is <root>/<group>/<uuid>/wire.jsonl; combine both to avoid
+	// collisions when the same UUID appears under different groups.
+	uuidDir := filepath.Dir(path)
+	sessionID := filepath.Base(uuidDir)
+	if group := filepath.Base(filepath.Dir(uuidDir)); group != "" && group != "." && group != string(filepath.Separator) {
+		sessionID = group + "/" + sessionID
+	}
 	if fallbackModel == "" {
 		fallbackModel = defaultModel
 	}

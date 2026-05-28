@@ -8,7 +8,10 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
-const PathHintSessionsDirKey = "sessions_dir"
+const (
+	PathHintSessionsDirKey    = "sessions_dir"
+	PathHintOmpSessionsDirKey = "omp_sessions_dir"
+)
 
 func defaultPiSessionsDir() string {
 	home, err := os.UserHomeDir()
@@ -27,21 +30,32 @@ func defaultOmpSessionsDir() string {
 }
 
 // resolveSessionsDirs returns the set of sessions directories to scan,
-// honoring a single per-account override. Only existing directories are
-// returned.
+// honoring independent per-account overrides for the Pi and OMP roots.
+// Only existing directories are returned.
 func resolveSessionsDirs(acct core.AccountConfig) []string {
-	if override := strings.TrimSpace(acct.Path(PathHintSessionsDirKey, "")); override != "" {
-		if dirExists(override) {
-			return []string{override}
-		}
+	piRoot := strings.TrimSpace(acct.Path(PathHintSessionsDirKey, ""))
+	if piRoot == "" {
+		piRoot = defaultPiSessionsDir()
 	}
+	ompRoot := strings.TrimSpace(acct.Path(PathHintOmpSessionsDirKey, ""))
+	if ompRoot == "" {
+		ompRoot = defaultOmpSessionsDir()
+	}
+
 	out := make([]string, 0, 2)
-	if d := defaultPiSessionsDir(); d != "" && dirExists(d) {
-		out = append(out, d)
+	seen := make(map[string]struct{}, 2)
+	add := func(p string) {
+		if p == "" || !dirExists(p) {
+			return
+		}
+		if _, dup := seen[p]; dup {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
 	}
-	if d := defaultOmpSessionsDir(); d != "" && dirExists(d) {
-		out = append(out, d)
-	}
+	add(piRoot)
+	add(ompRoot)
 	return out
 }
 

@@ -36,14 +36,12 @@ func legacyAgentsDirs() []string {
 }
 
 // resolveAgentsDirs returns every agents directory we should walk for this
-// account. An explicit override wins outright; otherwise we return the
-// de-duped union of existing default + legacy locations.
+// account. An explicit, existing override wins outright; a missing override
+// falls through to the de-duped union of existing default + legacy locations
+// so a stale settings.json entry doesn't blackhole the tile.
 func resolveAgentsDirs(acct core.AccountConfig) []string {
-	if override := strings.TrimSpace(acct.Path(PathHintAgentsDirKey, "")); override != "" {
-		if dirExists(override) {
-			return []string{override}
-		}
-		return nil
+	if override := strings.TrimSpace(acct.Path(PathHintAgentsDirKey, "")); override != "" && dirExists(override) {
+		return []string{override}
 	}
 
 	seen := make(map[string]struct{})

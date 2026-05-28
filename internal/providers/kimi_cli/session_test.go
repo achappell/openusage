@@ -10,8 +10,10 @@ import (
 func writeWire(t *testing.T, lines ...string) (path, sessionID string) {
 	t.Helper()
 	root := t.TempDir()
-	sessionID = "sess-uuid-123"
-	dir := filepath.Join(root, "group-a", sessionID)
+	group := "group-a"
+	uuid := "sess-uuid-123"
+	sessionID = group + "/" + uuid
+	dir := filepath.Join(root, group, uuid)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -172,6 +174,41 @@ func TestReadKimiConfigModel_FallbackOnMalformedOrEmpty(t *testing.T) {
 	}
 	if got := readKimiConfigModel(noModel); got != defaultModel {
 		t.Errorf("no model field: got %q, want %q", got, defaultModel)
+	}
+}
+
+func TestReadKimiWireFile_SessionIDIncludesGroup(t *testing.T) {
+	root := t.TempDir()
+	uuid := "shared-uuid"
+	for _, group := range []string{"alpha", "beta"} {
+		dir := filepath.Join(root, group, uuid)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		line := `{"timestamp":1735689600.0,"message":{"type":"StatusUpdate","payload":{"token_usage":{"output":1}}}}`
+		if err := os.WriteFile(filepath.Join(dir, "wire.jsonl"), []byte(line+"\n"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	got := make(map[string]struct{})
+	for _, group := range []string{"alpha", "beta"} {
+		entries, err := readKimiWireFileWithModel(filepath.Join(root, group, uuid, "wire.jsonl"), defaultModel)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("entries = %d, want 1", len(entries))
+		}
+		got[entries[0].SessionID] = struct{}{}
+	}
+	if len(got) != 2 {
+		t.Errorf("session ids = %v, want 2 distinct entries (group prefix must disambiguate)", got)
+	}
+	for _, want := range []string{"alpha/shared-uuid", "beta/shared-uuid"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("missing session id %q in %v", want, got)
+		}
 	}
 }
 

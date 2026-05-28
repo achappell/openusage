@@ -23,13 +23,23 @@ const PathHintSessionsDirKey = "sessions_dir"
 // file wins; if none exist, the resolver returns "".
 //
 // Kiro CLI is the renamed Amazon Q Developer CLI; the filename is identical
-// across both products. Windows path is not yet published by Amazon — when
-// a user reports it we'll add a candidate here.
+// across both products.
 func defaultDBPaths() []string {
 	var paths []string
 
 	if root := strings.TrimSpace(os.Getenv("KIRO_DATA_DIR")); root != "" {
 		paths = append(paths, filepath.Join(root, "data.sqlite3"))
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+			paths = append(paths, filepath.Join(local, "kiro-cli", "data.sqlite3"))
+		}
+		if roaming := strings.TrimSpace(os.Getenv("APPDATA")); roaming != "" {
+			paths = append(paths, filepath.Join(roaming, "kiro-cli", "data.sqlite3"))
+		}
+		return paths
 	}
 
 	home, err := os.UserHomeDir()
@@ -42,11 +52,7 @@ func defaultDBPaths() []string {
 		paths = append(paths,
 			filepath.Join(home, "Library", "Application Support", "kiro-cli", "data.sqlite3"),
 		)
-	case "linux":
-		paths = append(paths, xdgDataHomePath(home, "kiro-cli", "data.sqlite3"))
 	default:
-		// Windows is deliberately unhandled until Amazon publishes the
-		// data directory; users can override via KIRO_DATA_DIR.
 		paths = append(paths, xdgDataHomePath(home, "kiro-cli", "data.sqlite3"))
 	}
 
