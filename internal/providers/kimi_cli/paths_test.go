@@ -1,0 +1,73 @@
+package kimi_cli
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/janekbaraniewski/openusage/internal/core"
+)
+
+func TestResolveSessionsDir_DefaultAndOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// No directory exists yet → empty result.
+	acct := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli", Auth: "local"}
+	if got := resolveSessionsDir(acct); got != "" {
+		t.Errorf("no dir: resolveSessionsDir = %q, want empty", got)
+	}
+
+	// Create the default location.
+	defDir := filepath.Join(home, ".kimi", "sessions")
+	if err := os.MkdirAll(defDir, 0o755); err != nil {
+		t.Fatalf("mkdir default: %v", err)
+	}
+	if got := resolveSessionsDir(acct); got != defDir {
+		t.Errorf("default: resolveSessionsDir = %q, want %q", got, defDir)
+	}
+
+	// Override wins when present.
+	override := t.TempDir()
+	acct.SetPath(PathHintSessionsDirKey, override)
+	if got := resolveSessionsDir(acct); got != override {
+		t.Errorf("override: resolveSessionsDir = %q, want %q", got, override)
+	}
+
+	// Non-existent override falls back to default.
+	acctMissing := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli"}
+	acctMissing.SetPath(PathHintSessionsDirKey, filepath.Join(t.TempDir(), "nope"))
+	if got := resolveSessionsDir(acctMissing); got != defDir {
+		t.Errorf("missing override: resolveSessionsDir = %q, want %q (default)", got, defDir)
+	}
+}
+
+func TestResolveConfigPath_DefaultAndOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	acct := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli"}
+	if got := resolveConfigPath(acct); got != "" {
+		t.Errorf("no file: resolveConfigPath = %q, want empty", got)
+	}
+
+	defFile := filepath.Join(home, ".kimi", "config.json")
+	if err := os.MkdirAll(filepath.Dir(defFile), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(defFile, []byte(`{"model":"kimi-for-coding"}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := resolveConfigPath(acct); got != defFile {
+		t.Errorf("default: resolveConfigPath = %q, want %q", got, defFile)
+	}
+
+	override := filepath.Join(t.TempDir(), "custom.json")
+	if err := os.WriteFile(override, []byte(`{"model":"k2"}`), 0o600); err != nil {
+		t.Fatalf("write override: %v", err)
+	}
+	acct.SetPath(PathHintConfigPathKey, override)
+	if got := resolveConfigPath(acct); got != override {
+		t.Errorf("override: resolveConfigPath = %q, want %q", got, override)
+	}
+}
