@@ -6,7 +6,7 @@ sidebar_label: Providers
 
 # Providers
 
-OpenUsage supports 19 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
+OpenUsage supports 34 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
 
 ## Coding agents
 
@@ -36,6 +36,66 @@ These providers read local files, OAuth credentials, or shell out to a CLI. No A
   <a href="./opencode/">
     <strong>OpenCode</strong>
     <span>Zen models, spend via telemetry plugin</span>
+  </a>
+  <a href="./amp/">
+    <strong>Amp</strong>
+    <span>Threads, ledger-reconciled credits, per-model tokens</span>
+  </a>
+  <a href="./codebuff/">
+    <strong>Codebuff</strong>
+    <span>Multi-channel chat history, credits, three-tier usage extraction</span>
+  </a>
+  <a href="./crush/">
+    <strong>Crush</strong>
+    <span>Per-project SQLite walker, sessions and tokens</span>
+  </a>
+  <a href="./droid/">
+    <strong>Droid (Factory)</strong>
+    <span>Session activity from Factory's settings dir</span>
+  </a>
+  <a href="./goose/">
+    <strong>Goose</strong>
+    <span>Block's Goose agent, SQLite-backed session reader</span>
+  </a>
+  <a href="./hermes/">
+    <strong>Hermes</strong>
+    <span>Nous Hermes agent, per-profile SQLite state</span>
+  </a>
+  <a href="./kilocode/">
+    <strong>Kilo Code</strong>
+    <span>VS Code extension tasks, OSS coding agent</span>
+  </a>
+  <a href="./kimi-cli/">
+    <strong>Kimi CLI</strong>
+    <span>Local wire.jsonl session reader (distinct from the Moonshot API tile)</span>
+  </a>
+  <a href="./kiro/">
+    <strong>Kiro</strong>
+    <span>CLI sessions + SQLite, hybrid local reader</span>
+  </a>
+  <a href="./mux/">
+    <strong>Mux</strong>
+    <span>Per-workspace session-usage.json, sessions and per-model tokens</span>
+  </a>
+  <a href="./openclaw/">
+    <strong>OpenClaw</strong>
+    <span>Transcripts plus legacy clawdbot / moltbot / moldbot paths</span>
+  </a>
+  <a href="./pi/">
+    <strong>Pi</strong>
+    <span>Pi and Oh My Pi local agent sessions</span>
+  </a>
+  <a href="./qwen-cli/">
+    <strong>Qwen CLI</strong>
+    <span>Per-project chat JSONL, usageMetadata token shape</span>
+  </a>
+  <a href="./roocode/">
+    <strong>Roo Code</strong>
+    <span>VS Code extension event parser, per-task usage</span>
+  </a>
+  <a href="./zed/">
+    <strong>Zed Agent</strong>
+    <span>SQLite thread reader (hosted Zed models only)</span>
   </a>
 </div>
 

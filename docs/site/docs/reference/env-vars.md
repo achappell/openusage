@@ -17,10 +17,12 @@ OpenUsage reads two kinds of environment variables: **runtime overrides** (debug
 | `OPENUSAGE_GITHUB_TOKEN` | Token used for the in-app update check against GitHub. Optional; used to avoid anonymous rate limits. |
 | `OPENUSAGE_THEME_DIR` | Colon-separated list (semicolon on Windows) of extra directories scanned for theme JSON files. See [External themes](../customization/external-themes.md). |
 | `OPENUSAGE_MOONSHOT_STATE_PATH` | Override the path Moonshot's state file is read from. |
+| `OPENUSAGE_CUSTOM_PRICING` | Override the path to `custom-pricing.json` (default: `$XDG_CONFIG_HOME/openusage/custom-pricing.json` or `~/.config/openusage/custom-pricing.json`). See [Custom pricing overrides](./configuration.md#custom-pricing-overrides). |
 | `XDG_CONFIG_HOME` | Override the config base directory (default `~/.config`). |
 | `XDG_STATE_HOME` | Override the state base directory (default `~/.local/state`). |
 | `CLAUDE_SETTINGS_FILE` | Override the path to `~/.claude/settings.json`. Used by the `claude_code` provider and integration. |
 | `CODEX_CONFIG_DIR` | Override the path to `~/.codex/`. Used by the `codex` provider and integration. |
+| `CODEBUFF_DATA_DIR` | Additional channel root for the `codebuff` provider, appended to the default `manicode/`, `manicode-dev/`, and `manicode-staging/` channels under `~/.config/`. |
 
 ## API key environment variables
 
@@ -62,6 +64,21 @@ Some providers don't use API keys; they read local files or shell out to a tool 
 | `copilot` | `gh copilot` subcommands | `binary` field (default `gh`) |
 | `ollama` (local) | `http://127.0.0.1:11434` | `base_url` field |
 | `opencode` | OpenCode session data | `binary` field |
+| `amp` | Amp threads + ledger under `~/.local/share/amp/` | `binary` field |
+| `codebuff` | `~/.config/manicode/`, `manicode-dev/`, `manicode-staging/` | `CODEBUFF_DATA_DIR`, `data_dir` path hint |
+| `crush` | Per-project SQLite under Crush's data dir | `binary` field |
+| `droid` | Factory Droid's settings directory | `binary` field |
+| `goose` | Goose's session SQLite store | `binary` field |
+| `hermes` | `$HERMES_HOME/state.db` (fallback `~/.hermes/state.db`) | `HERMES_HOME`, `binary` field |
+| `kilocode` | `~/.config/Code/User/globalStorage/kilocode.kilo-code/tasks/` (+ VS Code Server path) | `binary` field |
+| `kimi_cli` | `~/.kimi/sessions/<group>/<uuid>/wire.jsonl` | `sessions_dir`, `config_path` path hints |
+| `kiro` | `~/.kiro/sessions/cli/` JSON/JSONL + local SQLite | `binary` field |
+| `mux` | `~/.mux/sessions/<workspaceId>/session-usage.json` | `sessions_dir` path hint |
+| `openclaw` | `~/.openclaw/agents/` (+ legacy `.clawdbot/`, `.moltbot/`, `.moldbot/`) | `agents_dir` path hint |
+| `pi` | `~/.pi/agent/sessions/` and `~/.omp/agent/sessions/` JSONL | `sessions_dir` path hint |
+| `qwen_cli` | `~/.qwen/projects/<project>/chats/*.jsonl` | `projects_dir` path hint |
+| `roocode` | `~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks/` (+ VS Code Server path) | `binary` field |
+| `zed` | Zed's `threads/threads.db` SQLite store (macOS / Linux / Windows paths) | `binary` field |
 
 ## Setting variables
 

@@ -393,6 +393,69 @@ Read-only mirror of accounts the detector found at startup. Format is identical 
 }
 ```
 
+## Custom pricing overrides
+
+OpenUsage's pricing pipeline pulls rates from LiteLLM and OpenRouter, falling back to a small built-in table when both are unreachable. When a model is mispriced upstream — or has been published before LiteLLM has caught up — you can override the rate locally in `custom-pricing.json`.
+
+### Location
+
+Searched in this order; the first existing file wins:
+
+1. The path in `OPENUSAGE_CUSTOM_PRICING`, if set.
+2. `$XDG_CONFIG_HOME/openusage/custom-pricing.json`, if `XDG_CONFIG_HOME` is set.
+3. `~/.config/openusage/custom-pricing.json`.
+
+### Format
+
+```json
+{
+  "models": {
+    "accounts/fireworks/routers/kimi-k2p6-turbo": {
+      "input_cost_per_million_tokens": 2.00,
+      "output_cost_per_million_tokens": 8.00,
+      "cache_read_input_token_cost_per_million_tokens": 0.30,
+      "provider": "fireworks",
+      "context_window": 131072
+    },
+    "kimi-k2p6-turbo": {
+      "input_cost_per_million_tokens": 2.00,
+      "output_cost_per_million_tokens": 8.00
+    }
+  }
+}
+```
+
+Rates are USD per million tokens. Both per-million (`input_cost_per_million_tokens`) and per-token (`input_cost_per_token`) spellings are accepted for copy/paste compatibility with upstream pricing pages; the per-million form is preferred for readability.
+
+| Field | Type | Notes |
+|---|---|---|
+| `input_cost_per_million_tokens` | number | Required. Prompt rate. |
+| `output_cost_per_million_tokens` | number | Required. Completion rate. |
+| `cache_read_input_token_cost_per_million_tokens` | number | Optional. |
+| `cache_creation_input_token_cost_per_million_tokens` | number | Optional. |
+| `reasoning_cost_per_million_tokens` | number | Optional. Defaults to the output rate when absent. |
+| `provider` | string | Optional. Surfaced on the snapshot for diagnostics. |
+| `context_window` | integer | Optional. |
+
+`input_cost_per_token`, `output_cost_per_token`, etc. are accepted as alternative spellings — they are multiplied by 1,000,000 internally.
+
+### Validation
+
+- At least one of `input_cost_per_million_tokens` or `output_cost_per_million_tokens` must be present and positive.
+- Negative, NaN, or infinite rates cause the whole model entry to be skipped so a single typo cannot poison the table.
+- Matches are case-insensitive on the model id, against both the raw id and a normalized form (so `claude-3.5-sonnet` and `claude-3-5-sonnet` are interchangeable).
+
+### Precedence
+
+Custom overrides beat every upstream source. Lookup order is:
+
+1. Custom overrides (this file)
+2. LiteLLM
+3. OpenRouter
+4. Built-in hardcoded table
+
+Overrides are loaded once at startup; restart `openusage` or the daemon after editing the file.
+
 ## See also
 
 - [Environment variables](./env-vars.md) — runtime overrides
