@@ -132,6 +132,21 @@ func latestSeriesValue(m map[string]float64) (string, float64) {
 	return last, m[last]
 }
 
+// todaySeriesValue returns m's value for today's local date, or zero
+// when today is absent. Used for "today_*" metrics so an empty day
+// reports zero rather than mislabelling the most recent past day's
+// data as "today".
+func todaySeriesValue(m map[string]float64) (string, float64) {
+	if len(m) == 0 {
+		return "", 0
+	}
+	today := time.Now().Format("2006-01-02")
+	if v, ok := m[today]; ok {
+		return today, v
+	}
+	return "", 0
+}
+
 func sumLastNDays(m map[string]float64, days int) float64 {
 	if len(m) == 0 || days <= 0 {
 		return 0

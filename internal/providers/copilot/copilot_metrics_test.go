@@ -23,12 +23,15 @@ func TestReadSessions_EmitsModelTokenMetrics(t *testing.T) {
 		t.Fatalf("mkdir sessions: %v", err)
 	}
 
+	// Use today's local date so the messages_today / sessions_today metrics
+	// populate (they only fire when the day key matches the local today).
+	todayDate := time.Now().Format("2006-01-02")
 	logContent := strings.Join([]string{
-		"2026-02-20T01:00:00.000Z [INFO] Workspace initialized: s1 (checkpoints: 0)",
-		"2026-02-20T01:00:01.000Z [INFO] CompactionProcessor: Utilization 1.0% (1200/128000 tokens) below threshold 80%",
-		"2026-02-20T01:00:02.000Z [INFO] CompactionProcessor: Utilization 1.4% (1800/128000 tokens) below threshold 80%",
-		"2026-02-20T02:00:00.000Z [INFO] Workspace initialized: s2 (checkpoints: 0)",
-		"2026-02-20T02:00:01.000Z [INFO] CompactionProcessor: Utilization 0.7% (900/128000 tokens) below threshold 80%",
+		todayDate + "T01:00:00.000Z [INFO] Workspace initialized: s1 (checkpoints: 0)",
+		todayDate + "T01:00:01.000Z [INFO] CompactionProcessor: Utilization 1.0% (1200/128000 tokens) below threshold 80%",
+		todayDate + "T01:00:02.000Z [INFO] CompactionProcessor: Utilization 1.4% (1800/128000 tokens) below threshold 80%",
+		todayDate + "T02:00:00.000Z [INFO] Workspace initialized: s2 (checkpoints: 0)",
+		todayDate + "T02:00:01.000Z [INFO] CompactionProcessor: Utilization 0.7% (900/128000 tokens) below threshold 80%",
 	}, "\n")
 	if err := os.WriteFile(filepath.Join(logDir, "process-test.log"), []byte(logContent), 0o644); err != nil {
 		t.Fatalf("write log: %v", err)
@@ -60,8 +63,8 @@ func TestReadSessions_EmitsModelTokenMetrics(t *testing.T) {
 		}
 	}
 
-	mkSession("s1", "gpt-5-mini", "2026-02-20T01:00:00Z", "2026-02-20T01:10:00Z")
-	mkSession("s2", "claude-sonnet-4.6", "2026-02-20T02:00:00Z", "2026-02-20T02:10:00Z")
+	mkSession("s1", "gpt-5-mini", todayDate+"T01:00:00Z", todayDate+"T01:10:00Z")
+	mkSession("s2", "claude-sonnet-4.6", todayDate+"T02:00:00Z", todayDate+"T02:10:00Z")
 
 	snap := &core.UsageSnapshot{
 		Metrics:     make(map[string]core.Metric),

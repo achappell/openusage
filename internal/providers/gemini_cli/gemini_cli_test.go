@@ -293,19 +293,23 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 		t.Fatalf("mkdir chat dir: %v", err)
 	}
 
+	// Use today's local date so the messages_today / tool_calls_today
+	// metrics populate (they only fire when the day key matches the local
+	// today).
+	today := time.Now().Format("2006-01-02")
 	chat := map[string]any{
 		"sessionId":   "session-1",
-		"startTime":   "2026-02-01T10:00:00Z",
-		"lastUpdated": "2026-02-01T10:05:00Z",
+		"startTime":   today + "T10:00:00Z",
+		"lastUpdated": today + "T10:05:00Z",
 		"messages": []map[string]any{
 			{
 				"type":      "user",
-				"timestamp": "2026-02-01T10:00:10Z",
+				"timestamp": today + "T10:00:10Z",
 				"content":   "hello",
 			},
 			{
 				"type":      "gemini",
-				"timestamp": "2026-02-01T10:01:00Z",
+				"timestamp": today + "T10:01:00Z",
 				"model":     "gemini-3-flash-preview",
 				"tokens": map[string]any{
 					"input":    90,
@@ -319,12 +323,12 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 			},
 			{
 				"type":      "user",
-				"timestamp": "2026-02-01T10:02:00Z",
+				"timestamp": today + "T10:02:00Z",
 				"content":   "more",
 			},
 			{
 				"type":      "gemini",
-				"timestamp": "2026-02-01T10:03:00Z",
+				"timestamp": today + "T10:03:00Z",
 				"model":     "gemini-3-flash-preview",
 				"tokens": map[string]any{
 					"input":    190,
@@ -338,7 +342,7 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 			},
 		},
 	}
-	writeJSON(t, filepath.Join(chatDir, "session-2026-02-01T10-00-aaaa1111.json"), chat)
+	writeJSON(t, filepath.Join(chatDir, "session-"+today+"T10-00-aaaa1111.json"), chat)
 
 	p := New()
 	acct := testGeminiCLIAccount("test-gemini-cli", tmpDir)

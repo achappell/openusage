@@ -407,31 +407,31 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 		setUsedMetric(snap, "avg_tools_per_session", avgToolsPerSession, "calls", defaultUsageWindowLabel)
 	}
 
-	if _, v := latestSeriesValue(dailyMessages); v > 0 {
+	if _, v := todaySeriesValue(dailyMessages); v > 0 {
 		setUsedMetric(snap, "messages_today", v, "messages", "today")
 	}
-	if _, v := latestSeriesValue(dailySessions); v > 0 {
+	if _, v := todaySeriesValue(dailySessions); v > 0 {
 		setUsedMetric(snap, "sessions_today", v, "sessions", "today")
 	}
-	if _, v := latestSeriesValue(dailyToolCalls); v > 0 {
+	if _, v := todaySeriesValue(dailyToolCalls); v > 0 {
 		setUsedMetric(snap, "tool_calls_today", v, "calls", "today")
 	}
-	if _, v := latestSeriesValue(dailyTokens); v > 0 {
+	if _, v := todaySeriesValue(dailyTokens); v > 0 {
 		setUsedMetric(snap, "tokens_today", v, "tokens", "today")
 	}
-	if _, v := latestSeriesValue(dailyInputTokens); v > 0 {
+	if _, v := todaySeriesValue(dailyInputTokens); v > 0 {
 		setUsedMetric(snap, "today_input_tokens", v, "tokens", "today")
 	}
-	if _, v := latestSeriesValue(dailyOutputTokens); v > 0 {
+	if _, v := todaySeriesValue(dailyOutputTokens); v > 0 {
 		setUsedMetric(snap, "today_output_tokens", v, "tokens", "today")
 	}
-	if _, v := latestSeriesValue(dailyCachedTokens); v > 0 {
+	if _, v := todaySeriesValue(dailyCachedTokens); v > 0 {
 		setUsedMetric(snap, "today_cached_tokens", v, "tokens", "today")
 	}
-	if _, v := latestSeriesValue(dailyReasoningTokens); v > 0 {
+	if _, v := todaySeriesValue(dailyReasoningTokens); v > 0 {
 		setUsedMetric(snap, "today_reasoning_tokens", v, "tokens", "today")
 	}
-	if _, v := latestSeriesValue(dailyToolTokens); v > 0 {
+	if _, v := todaySeriesValue(dailyToolTokens); v > 0 {
 		setUsedMetric(snap, "today_tool_tokens", v, "tokens", "today")
 	}
 

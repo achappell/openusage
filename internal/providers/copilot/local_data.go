@@ -503,21 +503,21 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 		}
 	}
 
-	if _, v := latestSeriesValue(dailyCost); v > 0 {
+	if _, v := todaySeriesValue(dailyCost); v > 0 {
 		setUsedMetric(snap, "cost_today", v, "USD", "today")
 	}
 	setUsedMetric(snap, "7d_cost", sumLastNDays(dailyCost, 7), "USD", "7d")
 
-	if _, v := latestSeriesValue(dailyMessages); v > 0 {
+	if _, v := todaySeriesValue(dailyMessages); v > 0 {
 		setUsedMetric(snap, "messages_today", v, "messages", "today")
 	}
-	if _, v := latestSeriesValue(dailySessions); v > 0 {
+	if _, v := todaySeriesValue(dailySessions); v > 0 {
 		setUsedMetric(snap, "sessions_today", v, "sessions", "today")
 	}
-	if _, v := latestSeriesValue(dailyToolCalls); v > 0 {
+	if _, v := todaySeriesValue(dailyToolCalls); v > 0 {
 		setUsedMetric(snap, "tool_calls_today", v, "calls", "today")
 	}
-	if _, v := latestSeriesValue(dailyTokens); v > 0 {
+	if _, v := todaySeriesValue(dailyTokens); v > 0 {
 		setUsedMetric(snap, "tokens_today", v, "tokens", "today")
 	}
 	setUsedMetric(snap, "7d_messages", sumLastNDays(dailyMessages, 7), "messages", "7d")
