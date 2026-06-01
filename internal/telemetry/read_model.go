@@ -107,7 +107,55 @@ func ApplyCanonicalTelemetryViewWithOptions(
 	done = trace("applyCanonicalUsageViewWithDB")
 	result, err := applyCanonicalUsageViewWithDB(ctx, db, usageViewCacheNamespace(dbPath), merged, links, options.Since, options.TodaySince, options.TimeWindow)
 	done()
-	return result, err
+	if err != nil {
+		return result, err
+	}
+
+	done = trace("applyWindowedCreditSpend")
+	result = applyWindowedCreditSpend(ctx, db, result, options)
+	done()
+	return result, nil
+}
+
+// applyWindowedCreditSpend derives true spend within the selected window from
+// our own observed balance series and attaches it to each credit account's
+// snapshot as the `window_credit_spend` metric (plus partial-coverage
+// attributes). This is what makes the dashboard's window selector meaningful
+// for credits, uniformly across providers, regardless of what each API exposes.
+func applyWindowedCreditSpend(ctx context.Context, db *sql.DB, snaps map[string]core.UsageSnapshot, options ReadModelOptions) map[string]core.UsageSnapshot {
+	if db == nil || len(snaps) == 0 || options.Since.IsZero() {
+		return snaps
+	}
+	store := NewStore(db)
+	for id, snap := range snaps {
+		metricKey, semantics, ok, err := store.PrimaryCreditMetric(ctx, snap.ProviderID, snap.AccountID)
+		if err != nil || !ok {
+			continue
+		}
+		res, err := store.WindowedSpend(ctx, snap.ProviderID, snap.AccountID, metricKey, semantics, options.Since)
+		if err != nil || !res.OK {
+			continue
+		}
+		snap.EnsureMaps()
+		spend := res.Spend
+		unit := res.Unit
+		if unit == "" {
+			unit = "USD"
+		}
+		snap.Metrics["window_credit_spend"] = core.Metric{
+			Used:   &spend,
+			Unit:   unit,
+			Window: string(options.TimeWindow),
+		}
+		if res.Partial {
+			snap.SetAttribute("window_credit_spend_partial", "true")
+			if !res.Since.IsZero() {
+				snap.SetAttribute("window_credit_spend_since", res.Since.UTC().Format(time.RFC3339))
+			}
+		}
+		snaps[id] = snap
+	}
+	return snaps
 }
 
 func hydrateRootsFromLimitSnapshots(ctx context.Context, db *sql.DB, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {

@@ -56,6 +56,11 @@ func New() *Provider {
 				Quickstart: []string{"Set MISTRAL_API_KEY to a valid Mistral API key."},
 			},
 			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleFlamingo)),
+			CreditMetrics: map[string]core.BalanceSemantics{
+				"monthly_spend":  core.BalanceCumulative,
+				"credit_balance": core.BalancePoint,
+				"monthly_budget": core.BalanceLimit,
+			},
 		}),
 	}
 }

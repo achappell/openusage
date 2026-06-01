@@ -200,7 +200,58 @@ func (s *Service) ingestQuotaSnapshots(ctx context.Context, snapshots map[string
 	if s == nil || s.quotaIngest == nil {
 		return fmt.Errorf("quota ingestor unavailable")
 	}
+	// Persist a durable numeric balance series alongside the limit_snapshot
+	// events so windowed spend can be derived from deltas later. Best-effort:
+	// a recording failure must not abort quota ingestion.
+	s.recordBalanceObservations(ctx, snapshots)
 	return s.quotaIngest.Ingest(ctx, snapshots)
+}
+
+// recordBalanceObservations walks each snapshot's money metrics, classifies
+// them via the provider's declared CreditMetrics (falling back to Window-based
+// inference), and appends a row per metric to the balance observation series.
+func (s *Service) recordBalanceObservations(ctx context.Context, snapshots map[string]core.UsageSnapshot) {
+	if s.store == nil {
+		return
+	}
+	for _, snap := range snapshots {
+		provider, ok := s.providerByID[snap.ProviderID]
+		if !ok {
+			continue
+		}
+		spec := provider.Spec()
+		var obs []telemetry.BalanceObservation
+		for key, met := range snap.Metrics {
+			sem, ok := spec.InferBalanceSemantics(key, met.Window)
+			if !ok || sem == core.BalanceLimit {
+				continue
+			}
+			// Require the field the semantics depend on.
+			if sem == core.BalanceCumulative && met.Used == nil {
+				continue
+			}
+			if sem == core.BalancePoint && met.Remaining == nil {
+				continue
+			}
+			obs = append(obs, telemetry.BalanceObservation{
+				MetricKey:  key,
+				ObservedAt: snap.Timestamp,
+				Used:       met.Used,
+				Limit:      met.Limit,
+				Remaining:  met.Remaining,
+				Unit:       met.Unit,
+				Semantics:  string(sem),
+			})
+		}
+		if len(obs) == 0 {
+			continue
+		}
+		if err := s.store.RecordBalanceObservations(ctx, snap.ProviderID, snap.AccountID, obs); err != nil {
+			if s.shouldLog("balance_obs_warning", 30*time.Second) {
+				s.warnf("balance_obs_warning", "provider=%s error=%v", snap.ProviderID, err)
+			}
+		}
+	}
 }
 
 func (s *Service) ingestBatch(ctx context.Context, reqs []telemetry.IngestRequest) (ingestTally, []telemetry.IngestRequest) {

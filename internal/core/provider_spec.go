@@ -1,5 +1,7 @@
 package core
 
+import "strings"
+
 type ProviderAuthType string
 
 const (
@@ -103,4 +105,46 @@ type ProviderSpec struct {
 	Setup     ProviderSetupSpec
 	Dashboard DashboardWidget
 	Detail    DetailWidget
+
+	// CreditMetrics declares, per money-metric key, how that metric's numeric
+	// value behaves over time. The daemon records these metrics into a durable
+	// observation series and derives true windowed spend from the deltas, so it
+	// must know whether a value is a monotonic counter, a draining balance, or a
+	// fixed cap. Leave empty for providers that expose no money metrics.
+	CreditMetrics map[string]BalanceSemantics
+}
+
+// BalanceSemantics classifies how a money metric's value moves over time, which
+// determines how spend within a window is derived from observations of it.
+type BalanceSemantics string
+
+const (
+	// BalanceCumulative is a monotonically increasing used/spent counter
+	// (e.g. OpenRouter total_usage). Windowed spend = used(now) − used(window start).
+	BalanceCumulative BalanceSemantics = "cumulative"
+	// BalancePoint is a point-in-time remaining balance that falls as you spend
+	// and rises on top-up (e.g. Moonshot available_balance). Windowed spend =
+	// sum of the per-step drops, excluding top-ups.
+	BalancePoint BalanceSemantics = "balance"
+	// BalanceLimit is a fixed budget cap that carries no spend signal of its own
+	// (e.g. Cursor spend_limit). No windowed spend is derived from it.
+	BalanceLimit BalanceSemantics = "limit"
+)
+
+// InferBalanceSemantics returns the semantics declared for metricKey, falling
+// back to an inference from the metric's Window when the provider has not
+// declared it: a "lifetime"/"all-time" window implies a cumulative counter, a
+// "current" balance implies a point-in-time balance. Returns ("", false) when
+// nothing can be determined, so callers skip the metric.
+func (s ProviderSpec) InferBalanceSemantics(metricKey, window string) (BalanceSemantics, bool) {
+	if sem, ok := s.CreditMetrics[metricKey]; ok {
+		return sem, true
+	}
+	switch strings.ToLower(strings.TrimSpace(window)) {
+	case "lifetime", "all-time", "all", "alltime":
+		return BalanceCumulative, true
+	case "current":
+		return BalancePoint, true
+	}
+	return "", false
 }

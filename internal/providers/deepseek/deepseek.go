@@ -50,6 +50,9 @@ func New() *Provider {
 				Quickstart: []string{"Set DEEPSEEK_API_KEY to a valid DeepSeek API key."},
 			},
 			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleSky)),
+			CreditMetrics: map[string]core.BalanceSemantics{
+				"total_balance": core.BalancePoint,
+			},
 		}),
 	}
 }

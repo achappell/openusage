@@ -119,6 +119,10 @@ func New() *Provider {
 				},
 			},
 			Dashboard: dashboardWidget(),
+			CreditMetrics: map[string]core.BalanceSemantics{
+				"credit_balance": core.BalancePoint,
+				"spend_limit":    core.BalanceLimit,
+			},
 		}),
 	}
 }

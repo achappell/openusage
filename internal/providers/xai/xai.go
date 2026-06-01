@@ -47,6 +47,9 @@ func New() *Provider {
 				Quickstart: []string{"Set XAI_API_KEY to a valid xAI API key."},
 			},
 			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleMaroon)),
+			CreditMetrics: map[string]core.BalanceSemantics{
+				"credits": core.BalancePoint,
+			},
 		}),
 	}
 }

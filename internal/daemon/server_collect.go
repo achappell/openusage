@@ -198,6 +198,16 @@ func (s *Service) pruneOldData(ctx context.Context) {
 	pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	// Thin and trim the balance observation series independently of usage
+	// events — it grows on its own poll cadence and has its own retention floor.
+	if thinned, berr := s.store.PruneBalanceObservations(pruneCtx, retentionDays); berr != nil {
+		if s.shouldLog("balance_prune_error", 30*time.Second) {
+			s.warnf("balance_prune_error", "error=%v", berr)
+		}
+	} else if thinned > 0 {
+		s.infof("balance_prune", "thinned=%d retention_days=%d", thinned, retentionDays)
+	}
+
 	deleted, err := s.store.PruneOldEvents(pruneCtx, retentionDays)
 	if err != nil {
 		if s.shouldLog("retention_prune_error", 30*time.Second) {

@@ -202,6 +202,24 @@ func (s *Store) Init(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_recon_provider_window ON usage_reconciliation_windows(provider_id, account_id, window_start, window_end);`,
+		// balance_observations is a compact, durable numeric time-series of each
+		// credit/balance metric we observe on every poll. Unlike the limit_snapshot
+		// raw payloads (wiped to '{}' after 1h), these rows persist for the full
+		// retention horizon so windowed spend can be computed as a delta over any
+		// window. One row is a handful of floats, so the series stays tiny.
+		`CREATE TABLE IF NOT EXISTS balance_observations (
+			provider_id TEXT NOT NULL,
+			account_id TEXT NOT NULL,
+			metric_key TEXT NOT NULL,
+			observed_at TEXT NOT NULL,
+			used REAL,
+			limit_val REAL,
+			remaining REAL,
+			unit TEXT,
+			semantics TEXT NOT NULL,
+			PRIMARY KEY (provider_id, account_id, metric_key, observed_at)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_balance_obs_lookup ON balance_observations(provider_id, account_id, metric_key, observed_at);`,
 	}
 
 	for _, stmt := range stmts {

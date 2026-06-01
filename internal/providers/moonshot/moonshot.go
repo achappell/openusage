@@ -58,6 +58,11 @@ func New() *Provider {
 				},
 			},
 			Dashboard: dashboardWidget(),
+			CreditMetrics: map[string]core.BalanceSemantics{
+				"available_balance": core.BalancePoint,
+				"cash_balance":      core.BalancePoint,
+				"voucher_balance":   core.BalancePoint,
+			},
 		}),
 	}
 }

@@ -42,6 +42,9 @@ func New() *Provider {
 				},
 			},
 			Dashboard: dashboardWidget(),
+			CreditMetrics: map[string]core.BalanceSemantics{
+				"total_cost": core.BalanceCumulative,
+			},
 		}),
 	}
 }

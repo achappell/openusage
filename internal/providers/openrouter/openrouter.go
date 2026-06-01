@@ -223,6 +223,9 @@ func New() *Provider {
 				Quickstart: []string{"Set OPENROUTER_API_KEY to a valid OpenRouter API key."},
 			},
 			Dashboard: dashboardWidget(),
+			CreditMetrics: map[string]core.BalanceSemantics{
+				"credit_balance": core.BalanceCumulative,
+			},
 		}),
 		clock: core.SystemClock{},
 	}

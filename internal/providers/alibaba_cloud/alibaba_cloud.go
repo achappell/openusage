@@ -79,6 +79,13 @@ func New() *Provider {
 				},
 			},
 			Dashboard: dashboardWidget(),
+			CreditMetrics: map[string]core.BalanceSemantics{
+				"daily_spend":       core.BalanceCumulative,
+				"monthly_spend":     core.BalanceCumulative,
+				"credit_balance":    core.BalanceLimit,
+				"available_balance": core.BalanceLimit,
+				"spend_limit":       core.BalanceLimit,
+			},
 		}),
 	}
 }

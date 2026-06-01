@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
@@ -108,7 +109,14 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagLabel = "Credits"
 		info.reason = "available_balance"
 		info.summary = fmt.Sprintf("%s%.2f / %s%.2f spent", sym, *m.Used, sym, *m.Limit)
-		info.detail = fmt.Sprintf("%s%.2f remaining", sym, remaining)
+		detailParts := []string{fmt.Sprintf("%s%.2f remaining", sym, remaining)}
+		// Lead with the authoritative windowed credit-spend figure when present
+		// so the detail line reports spend within the selected time window
+		// rather than only the cumulative remaining balance.
+		if windowSpendPart, ok := windowCreditSpendPart(snap); ok {
+			detailParts = append(detailParts, windowSpendPart)
+		}
+		info.detail = strings.Join(detailParts, " · ")
 		// m.Percent() returns *remaining* percentage; gauges in this codebase
 		// fill with *used* percentage. Same convention as the spend_limit and
 		// plan_spend branches above.
@@ -508,40 +516,46 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 		if m.Used != nil {
 			spent = *m.Used
 		}
-		info.summary = fmt.Sprintf("$%.2f / $%.2f spent", spent, *m.Limit)
+		// credit_balance is a cumulative balance, not a windowed figure: its
+		// "spent" is everything used against the account's credit pool
+		// (lifetime for OpenRouter, current billing cycle for Z.AI). Tag the
+		// scope explicitly so the headline can't be misread as spend within
+		// the dashboard's selected time window (issue #175).
+		if scope := creditScopeTag(m.Window); scope != "" {
+			info.summary = fmt.Sprintf("$%.2f / $%.2f spent · %s", spent, *m.Limit, scope)
+		} else {
+			info.summary = fmt.Sprintf("$%.2f / $%.2f spent", spent, *m.Limit)
+		}
 		if pct := m.Percent(); pct >= 0 {
 			info.gaugePercent = 100 - pct
 		}
 
-		detailParts := []string{fmt.Sprintf("$%.2f remaining", *m.Remaining)}
-		if dc, ok2 := snap.Metrics["today_cost"]; ok2 && dc.Used != nil {
-			tag := metricWindowTag(dc)
-			if tag != "" {
-				detailParts = append(detailParts, fmt.Sprintf("%s $%.2f", tag, *dc.Used))
-			} else {
-				detailParts = append(detailParts, fmt.Sprintf("$%.2f", *dc.Used))
-			}
-		} else if dc, ok2 := snap.Metrics["usage_daily"]; ok2 && dc.Used != nil {
-			tag := metricWindowTag(dc)
-			if tag != "" {
-				detailParts = append(detailParts, fmt.Sprintf("%s $%.2f", tag, *dc.Used))
-			} else {
-				detailParts = append(detailParts, fmt.Sprintf("$%.2f", *dc.Used))
-			}
+		// Detail line keeps the two figures cleanly separated: remaining
+		// balance first, then per-window spend so the windowed numbers are
+		// never confused with the cumulative headline above.
+		detailParts := []string{fmt.Sprintf("$%.2f left", *m.Remaining)}
+		// Prefer the authoritative windowed credit-spend metric: it tracks the
+		// dashboard's selected window and leads the spend breakdown. When it is
+		// present we drop any static per-window part whose tag duplicates the
+		// active window so the line never shows two "<window> $..." figures.
+		windowSpendPart, hasWindowSpend := windowCreditSpendPart(snap)
+		if hasWindowSpend {
+			detailParts = append(detailParts, windowSpendPart)
 		}
-		if wc, ok2 := snap.Metrics["7d_api_cost"]; ok2 && wc.Used != nil {
-			tag := metricWindowTag(wc)
-			if tag != "" {
-				detailParts = append(detailParts, fmt.Sprintf("%s $%.2f", tag, *wc.Used))
-			} else {
-				detailParts = append(detailParts, fmt.Sprintf("$%.2f", *wc.Used))
+		activeWindow := strings.TrimSpace(snap.Metrics["window_credit_spend"].Window)
+		for _, w := range []struct {
+			tag  string
+			keys []string
+		}{
+			{"1d", []string{"today_cost", "usage_daily"}},
+			{"7d", []string{"7d_api_cost", "usage_weekly", "analytics_7d_cost"}},
+			{"30d", []string{"30d_api_cost", "usage_monthly", "analytics_30d_cost"}},
+		} {
+			if hasWindowSpend && w.tag == activeWindow {
+				continue
 			}
-		} else if wc, ok2 := snap.Metrics["usage_weekly"]; ok2 && wc.Used != nil {
-			tag := metricWindowTag(wc)
-			if tag != "" {
-				detailParts = append(detailParts, fmt.Sprintf("%s $%.2f", tag, *wc.Used))
-			} else {
-				detailParts = append(detailParts, fmt.Sprintf("$%.2f", *wc.Used))
+			if part := windowedCostPart(snap, w.tag, w.keys...); part != "" {
+				detailParts = append(detailParts, part)
 			}
 		}
 		if models := snapshotMeta(snap, "activity_models"); models != "" {
@@ -612,4 +626,61 @@ func windowActivityLineWithHide(snap core.UsageSnapshot, tw core.TimeWindow, hid
 
 func metricWindowTag(met core.Metric) string {
 	return strings.TrimSpace(met.Window)
+}
+
+// creditScopeTag maps a credit_balance metric's Window onto a short,
+// human-readable scope label for the headline. Cumulative credit balances
+// are not windowed, so the tag makes the scope explicit instead of letting
+// the figure inherit the dashboard's selected time window (issue #175).
+func creditScopeTag(window string) string {
+	switch strings.ToLower(strings.TrimSpace(window)) {
+	case "", "lifetime", "all", "all-time", "alltime":
+		return "all-time"
+	case "current", "cycle", "billing", "billing-cycle":
+		return "current"
+	default:
+		return strings.TrimSpace(window)
+	}
+}
+
+// windowedCostPart formats the first present windowed-cost metric from keys
+// as "<tag> $X.XX", e.g. "30d $0.00". Returns "" when none of the keys carry
+// a value. The explicit tag is used rather than the metric's own Window so
+// equivalent metrics with differing window spellings ("today" vs "1d")
+// render consistently.
+func windowedCostPart(snap core.UsageSnapshot, tag string, keys ...string) string {
+	for _, k := range keys {
+		if m, ok := snap.Metrics[k]; ok && m.Used != nil {
+			return fmt.Sprintf("%s $%.2f", tag, *m.Used)
+		}
+	}
+	return ""
+}
+
+// windowCreditSpendPart formats the authoritative windowed credit-spend metric
+// (window_credit_spend) as "<window> $X.XX", e.g. "30d $0.00", tracking the
+// dashboard's selected time window. When the daemon's observation history does
+// not yet cover the whole window (attribute window_credit_spend_partial ==
+// "true"), it appends " (since YYYY-MM-DD)" using window_credit_spend_since so
+// the figure honestly signals incomplete history. Returns ok=false when the
+// metric is absent or carries no value, so callers can fall back to the static
+// per-window breakdown.
+func windowCreditSpendPart(snap core.UsageSnapshot) (part string, ok bool) {
+	m, present := snap.Metrics["window_credit_spend"]
+	if !present || m.Used == nil {
+		return "", false
+	}
+	window := strings.TrimSpace(m.Window)
+	if window == "" {
+		window = "window"
+	}
+	part = fmt.Sprintf("%s $%.2f", window, *m.Used)
+	if snapshotMeta(snap, "window_credit_spend_partial") == "true" {
+		if since := snapshotMeta(snap, "window_credit_spend_since"); since != "" {
+			if t, err := time.Parse(time.RFC3339, since); err == nil {
+				part += fmt.Sprintf(" (since %s)", t.Format("2006-01-02"))
+			}
+		}
+	}
+	return part, true
 }
