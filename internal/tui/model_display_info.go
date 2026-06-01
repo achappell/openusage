@@ -530,33 +530,13 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 			info.gaugePercent = 100 - pct
 		}
 
-		// Detail line keeps the two figures cleanly separated: remaining
-		// balance first, then per-window spend so the windowed numbers are
-		// never confused with the cumulative headline above.
+		// Detail line: remaining balance, then the single authoritative
+		// spend-in-the-selected-window figure (the daemon picks the provider's
+		// own windowed metric when it has one, else derives it from the
+		// observed balance series). One window, not a 1d/7d/30d dump.
 		detailParts := []string{fmt.Sprintf("$%.2f left", *m.Remaining)}
-		// Prefer the authoritative windowed credit-spend metric: it tracks the
-		// dashboard's selected window and leads the spend breakdown. When it is
-		// present we drop any static per-window part whose tag duplicates the
-		// active window so the line never shows two "<window> $..." figures.
-		windowSpendPart, hasWindowSpend := windowCreditSpendPart(snap)
-		if hasWindowSpend {
+		if windowSpendPart, ok := windowCreditSpendPart(snap); ok {
 			detailParts = append(detailParts, windowSpendPart)
-		}
-		activeWindow := strings.TrimSpace(snap.Metrics["window_credit_spend"].Window)
-		for _, w := range []struct {
-			tag  string
-			keys []string
-		}{
-			{"1d", []string{"today_cost", "usage_daily"}},
-			{"7d", []string{"7d_api_cost", "usage_weekly", "analytics_7d_cost"}},
-			{"30d", []string{"30d_api_cost", "usage_monthly", "analytics_30d_cost"}},
-		} {
-			if hasWindowSpend && w.tag == activeWindow {
-				continue
-			}
-			if part := windowedCostPart(snap, w.tag, w.keys...); part != "" {
-				detailParts = append(detailParts, part)
-			}
 		}
 		if models := snapshotMeta(snap, "activity_models"); models != "" {
 			detailParts = append(detailParts, fmt.Sprintf("%s models", models))
@@ -641,20 +621,6 @@ func creditScopeTag(window string) string {
 	default:
 		return strings.TrimSpace(window)
 	}
-}
-
-// windowedCostPart formats the first present windowed-cost metric from keys
-// as "<tag> $X.XX", e.g. "30d $0.00". Returns "" when none of the keys carry
-// a value. The explicit tag is used rather than the metric's own Window so
-// equivalent metrics with differing window spellings ("today" vs "1d")
-// render consistently.
-func windowedCostPart(snap core.UsageSnapshot, tag string, keys ...string) string {
-	for _, k := range keys {
-		if m, ok := snap.Metrics[k]; ok && m.Used != nil {
-			return fmt.Sprintf("%s $%.2f", tag, *m.Used)
-		}
-	}
-	return ""
 }
 
 // windowCreditSpendPart formats the authoritative windowed credit-spend metric

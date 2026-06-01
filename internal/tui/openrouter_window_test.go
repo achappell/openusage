@@ -11,8 +11,9 @@ import (
 
 // TestDetailedCredits_OpenRouterScopesLifetimeSpend covers issue #175: the
 // cumulative credit-balance headline must be tagged "all-time" so it is not
-// read as spend within the dashboard's selected time window, and the windowed
-// figures (1d/7d/30d) must be shown separately with explicit tags.
+// read as spend within the dashboard's selected time window, and the detail
+// line shows exactly one windowed figure (the authoritative window_credit_spend
+// the daemon computes for the active window), not a 1d/7d/30d dump.
 func TestDetailedCredits_OpenRouterScopesLifetimeSpend(t *testing.T) {
 	totalCredits := 80.00
 	totalUsage := 60.63
@@ -28,9 +29,8 @@ func TestDetailedCredits_OpenRouterScopesLifetimeSpend(t *testing.T) {
 				Limit: &totalCredits, Used: &totalUsage, Remaining: &remaining,
 				Unit: "USD", Window: "lifetime",
 			},
-			"today_cost":   {Used: &zero, Unit: "USD", Window: "today"},
-			"7d_api_cost":  {Used: &zero, Unit: "USD", Window: "7d"},
-			"30d_api_cost": {Used: &zero, Unit: "USD", Window: "30d"},
+			// The read model collapses the active window to one metric.
+			"window_credit_spend": {Used: &zero, Unit: "USD", Window: "30d"},
 		},
 	}
 
@@ -42,10 +42,15 @@ func TestDetailedCredits_OpenRouterScopesLifetimeSpend(t *testing.T) {
 	if !strings.Contains(got.summary, "60.63") || !strings.Contains(got.summary, "80.00") {
 		t.Errorf("summary should still show lifetime spent/total, got %q", got.summary)
 	}
-	// Windowed spend must be present and clearly tagged, including 30d.
-	for _, want := range []string{"1d $0.00", "7d $0.00", "30d $0.00", "$19.37 left"} {
+	// Exactly one windowed figure for the active window, plus remaining.
+	for _, want := range []string{"30d $0.00", "$19.37 left"} {
 		if !strings.Contains(got.detail, want) {
 			t.Errorf("detail missing %q; got %q", want, got.detail)
+		}
+	}
+	for _, unwanted := range []string{"1d $", "7d $"} {
+		if strings.Contains(got.detail, unwanted) {
+			t.Errorf("detail should show only the active window, got %q", got.detail)
 		}
 	}
 	// The bare, untagged "spent" headline that caused the confusion must be gone.

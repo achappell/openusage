@@ -73,3 +73,50 @@ func TestApplyCanonicalTelemetryView_WindowCreditSpend(t *testing.T) {
 		}
 	}
 }
+
+// When the provider exposes its own windowed-spend metric for the active
+// window, window_credit_spend must use that authoritative value rather than a
+// (possibly partial) delta from our observed series.
+func TestApplyCanonicalTelemetryView_PrefersNativeWindowMetric(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	ctx := context.Background()
+	// Observed series would yield a delta of 5.00 over 30d...
+	if err := store.RecordBalanceObservations(ctx, "openrouter", "openrouter", []BalanceObservation{
+		{MetricKey: "credit_balance", ObservedAt: now.AddDate(0, 0, -3), Used: f64(100), Unit: "USD", Semantics: balanceSemanticsCumulative},
+		{MetricKey: "credit_balance", ObservedAt: now, Used: f64(105), Unit: "USD", Semantics: balanceSemanticsCumulative},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// ...but OpenRouter's own 30d bucket says 2.50 — that must win.
+	native := 2.50
+	base := map[string]core.UsageSnapshot{
+		"openrouter": {
+			ProviderID: "openrouter", AccountID: "openrouter", Status: core.StatusOK,
+			Metrics: map[string]core.Metric{
+				"credit_balance": {Used: f64(105), Limit: f64(120), Remaining: f64(15), Unit: "USD", Window: "lifetime"},
+				"30d_api_cost":   {Used: &native, Unit: "USD", Window: "30d"},
+			},
+		},
+	}
+	got, err := ApplyCanonicalTelemetryViewWithOptions(ctx, dbPath, base, ReadModelOptions{
+		Since: now.AddDate(0, 0, -30), TimeWindow: core.TimeWindow30d,
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	m := got["openrouter"].Metrics["window_credit_spend"]
+	if m.Used == nil || *m.Used != native {
+		t.Fatalf("window_credit_spend = %+v, want native 2.50 (not tracked delta)", m.Used)
+	}
+	if got["openrouter"].Attributes["window_credit_spend_partial"] == "true" {
+		t.Errorf("native metric is authoritative; must not be marked partial")
+	}
+}

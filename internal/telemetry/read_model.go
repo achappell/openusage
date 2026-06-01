@@ -117,17 +117,37 @@ func ApplyCanonicalTelemetryViewWithOptions(
 	return result, nil
 }
 
-// applyWindowedCreditSpend derives true spend within the selected window from
-// our own observed balance series and attaches it to each credit account's
-// snapshot as the `window_credit_spend` metric (plus partial-coverage
-// attributes). This is what makes the dashboard's window selector meaningful
-// for credits, uniformly across providers, regardless of what each API exposes.
+// applyWindowedCreditSpend attaches a single authoritative spend-in-window
+// figure to each credit account as the `window_credit_spend` metric, so the
+// dashboard shows exactly one windowed number that tracks the selected window
+// (rather than a confusing 1d/7d/30d dump).
+//
+// Source precedence for the active window:
+//  1. The provider's own windowed-spend metric for that window
+//     (e.g. OpenRouter's 30d_api_cost) — authoritative and complete, no
+//     partial-coverage caveat.
+//  2. Otherwise, the delta over our observed balance series — the only option
+//     for balance-only providers (Moonshot, DeepSeek, xAI). Marked partial
+//     (with a "since" date) when our history doesn't yet span the window.
 func applyWindowedCreditSpend(ctx context.Context, db *sql.DB, snaps map[string]core.UsageSnapshot, options ReadModelOptions) map[string]core.UsageSnapshot {
-	if db == nil || len(snaps) == 0 || options.Since.IsZero() {
+	if len(snaps) == 0 || options.Since.IsZero() {
 		return snaps
 	}
 	store := NewStore(db)
 	for id, snap := range snaps {
+		// 1. Prefer the provider's native windowed-spend metric.
+		if val, unit, ok := nativeWindowSpend(snap, options.TimeWindow); ok {
+			snap.EnsureMaps()
+			v := val
+			snap.Metrics["window_credit_spend"] = core.Metric{Used: &v, Unit: unit, Window: string(options.TimeWindow)}
+			snaps[id] = snap
+			continue
+		}
+
+		// 2. Fall back to the observed balance series.
+		if db == nil {
+			continue
+		}
 		metricKey, semantics, ok, err := store.PrimaryCreditMetric(ctx, snap.ProviderID, snap.AccountID)
 		if err != nil || !ok {
 			continue
@@ -156,6 +176,34 @@ func applyWindowedCreditSpend(ctx context.Context, db *sql.DB, snaps map[string]
 		snaps[id] = snap
 	}
 	return snaps
+}
+
+// nativeWindowSpend returns the provider's own spend metric for the active
+// window when it exposes one. Only calendar windows that map to a known
+// provider bucket are covered; 3d and all have no native bucket, so those fall
+// through to the observed-series delta.
+func nativeWindowSpend(snap core.UsageSnapshot, tw core.TimeWindow) (float64, string, bool) {
+	var keys []string
+	switch tw {
+	case core.TimeWindow1d:
+		keys = []string{"today_cost", "usage_daily"}
+	case core.TimeWindow7d:
+		keys = []string{"7d_api_cost", "analytics_7d_cost", "usage_weekly"}
+	case core.TimeWindow30d:
+		keys = []string{"30d_api_cost", "analytics_30d_cost", "usage_monthly"}
+	default:
+		return 0, "", false
+	}
+	for _, k := range keys {
+		if m, ok := snap.Metrics[k]; ok && m.Used != nil {
+			unit := m.Unit
+			if unit == "" {
+				unit = "USD"
+			}
+			return *m.Used, unit, true
+		}
+	}
+	return 0, "", false
 }
 
 func hydrateRootsFromLimitSnapshots(ctx context.Context, db *sql.DB, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {
