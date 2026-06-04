@@ -1,6 +1,7 @@
 package report
 
 import (
+	"sort"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -22,12 +23,17 @@ func FromSnapshots(snaps []core.UsageSnapshot) []Event {
 }
 
 func eventsFromSnapshot(snap core.UsageSnapshot) []Event {
-	costSeries := firstSeries(snap, "cost_usd", "cost", "spend")
-	if len(costSeries) > 0 {
-		tokenByDate := seriesByDate(firstSeries(snap, "tokens_total"))
-		out := make([]Event, 0, len(costSeries))
-		for _, pt := range costSeries {
-			ts := parseSeriesDate(pt.Date)
+	// Prefer a real daily series so the time axis is accurate. Providers use
+	// different keys for cost and tokens, so probe the known aliases.
+	costSeries := firstSeries(snap, "cost_usd", "cost", "spend", "analytics_cost", "credits")
+	tokenSeries := firstSeries(snap, "tokens_total", "tokens")
+	if len(costSeries) > 0 || len(tokenSeries) > 0 {
+		costByDate := seriesByDate(costSeries)
+		tokenByDate := seriesByDate(tokenSeries)
+		dates := unionDates(costSeries, tokenSeries)
+		out := make([]Event, 0, len(dates))
+		for _, d := range dates {
+			ts := parseSeriesDate(d)
 			if ts.IsZero() {
 				continue
 			}
@@ -35,15 +41,17 @@ func eventsFromSnapshot(snap core.UsageSnapshot) []Event {
 				Time:      ts,
 				Provider:  snap.ProviderID,
 				Model:     "(total)",
-				Cost:      pt.Value,
-				Input:     int(tokenByDate[pt.Date]),
+				Cost:      costByDate[d],
+				Input:     int(tokenByDate[d]),
 				Synthetic: true,
 			})
 		}
-		return out
+		if len(out) > 0 {
+			return out
+		}
 	}
 
-	// No daily cost series: fall back to a single lifetime-total event so the
+	// No usable daily series: fall back to a single lifetime-total event so the
 	// provider still appears in the unified spend view.
 	summary := core.ExtractAnalyticsCostSummary(snap)
 	if summary.TotalCostUSD <= 0 {
@@ -60,6 +68,22 @@ func eventsFromSnapshot(snap core.UsageSnapshot) []Event {
 		Cost:      summary.TotalCostUSD,
 		Synthetic: true,
 	}}
+}
+
+// unionDates returns the sorted union of dates present in either series.
+func unionDates(a, b []core.TimePoint) []string {
+	seen := map[string]bool{}
+	var dates []string
+	for _, s := range [][]core.TimePoint{a, b} {
+		for _, p := range s {
+			if !seen[p.Date] {
+				seen[p.Date] = true
+				dates = append(dates, p.Date)
+			}
+		}
+	}
+	sort.Strings(dates)
+	return dates
 }
 
 func firstSeries(snap core.UsageSnapshot, keys ...string) []core.TimePoint {

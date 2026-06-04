@@ -59,3 +59,32 @@ func TestFromSnapshots_NoCostNoEvent(t *testing.T) {
 		t.Errorf("got %d events for cost-less snapshot, want 0", len(events))
 	}
 }
+
+func TestFromSnapshots_RecognizesAlternateCostKey(t *testing.T) {
+	// cursor uses "analytics_cost" for its daily series.
+	snap := core.UsageSnapshot{
+		ProviderID: "cursor",
+		DailySeries: map[string][]core.TimePoint{
+			"analytics_cost": {{Date: "2026-06-01", Value: 3.0}},
+		},
+	}
+	events := FromSnapshots([]core.UsageSnapshot{snap})
+	if len(events) != 1 || events[0].Cost != 3.0 {
+		t.Fatalf("expected 1 event cost 3.0 from analytics_cost, got %+v", events)
+	}
+}
+
+func TestFromSnapshots_TokenOnlySeriesAppears(t *testing.T) {
+	// A token-only provider (no cost series) should still surface with token
+	// columns from its tokens_total series.
+	snap := core.UsageSnapshot{
+		ProviderID: "qwen_cli",
+		DailySeries: map[string][]core.TimePoint{
+			"tokens_total": {{Date: "2026-06-01", Value: 1500}},
+		},
+	}
+	events := FromSnapshots([]core.UsageSnapshot{snap})
+	if len(events) != 1 || events[0].Input != 1500 || events[0].Cost != 0 {
+		t.Fatalf("expected 1 token-only event (1500 tokens, $0), got %+v", events)
+	}
+}

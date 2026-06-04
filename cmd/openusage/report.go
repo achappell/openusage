@@ -10,9 +10,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/janekbaraniewski/openusage/internal/export"
+	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/report"
 )
+
+// telemetryCollectTimeout bounds a single provider's local-log collection.
+// Generous because a one-shot CLI report may parse a large history.
+const telemetryCollectTimeout = 30 * time.Second
 
 // reportFlags holds the shared flag set behind the daily/weekly/monthly/
 // session/blocks subcommands.
@@ -133,38 +139,68 @@ func runReport(kind report.Kind, f *reportFlags) error {
 	return rep.WriteTable(os.Stdout)
 }
 
-// gatherReportEvents assembles the unified event stream for a report. Claude
-// Code contributes full-fidelity conversation events; the periodic reports also
-// fold in every other provider from its snapshot daily series.
+// gatherReportEvents assembles the unified event stream for a report.
+//
+// Three itemized sources contribute per-turn events (timestamp + tokens + model
+// + session), which is what session/blocks need:
+//   - Claude Code, parsed at full fidelity (cost modes, dedup).
+//   - Every other provider implementing the telemetry source interface
+//     (codex, gemini_cli, copilot, cursor, ollama, opencode), via Collect().
+//
+// The periodic reports (daily/weekly/monthly) additionally fold in any
+// remaining provider from its snapshot cost/token series. Providers already
+// covered by an itemized source are excluded there to avoid double-counting.
 func gatherReportEvents(kind report.Kind, f *reportFlags) ([]report.Event, string, error) {
 	mode := claude_code.ParseCostMode(f.mode)
 	provider := strings.TrimSpace(f.provider)
+	cost := report.PricingCost(f.offline)
 
 	var events []report.Event
-	var note string
+	var notes []string
+	covered := map[string]bool{} // providers handled by an itemized source
 
+	// 1. Claude Code conversation logs.
 	if provider == "" || provider == "claude_code" {
 		cc, err := claudeCodeConversationEvents(mode, f.offline)
 		if err != nil {
-			note = fmt.Sprintf("claude_code logs unavailable: %v", err)
+			notes = append(notes, fmt.Sprintf("claude_code logs unavailable: %v", err))
 		}
 		events = append(events, cc...)
+		covered["claude_code"] = true
 	}
 
+	// 2. Other telemetry-source providers (per-turn local logs).
+	for _, p := range providers.AllProviders() {
+		src, ok := p.(shared.TelemetrySource)
+		if !ok || p.ID() == "claude_code" {
+			continue
+		}
+		if provider != "" && p.ID() != provider {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), telemetryCollectTimeout)
+		evs, err := src.Collect(ctx, src.DefaultCollectOptions())
+		cancel()
+		covered[p.ID()] = true
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("%s telemetry unavailable: %v", p.ID(), err))
+			continue
+		}
+		events = append(events, report.FromTelemetry(evs, p.ID(), cost)...)
+	}
+
+	// 3. Snapshot fallback for the remaining providers (periodic reports only).
 	periodic := kind == report.KindDaily || kind == report.KindWeekly || kind == report.KindMonthly
-	if periodic && provider != "claude_code" {
+	if periodic {
 		ctx := context.Background()
 		snaps, _, err := export.Collect(ctx, export.Source(strings.ToLower(strings.TrimSpace(f.source))))
 		if err != nil {
-			if note != "" {
-				note += "; "
-			}
-			note += fmt.Sprintf("provider snapshots unavailable: %v", err)
+			notes = append(notes, fmt.Sprintf("provider snapshots unavailable: %v", err))
 		} else {
 			others := snaps[:0]
 			for _, s := range snaps {
-				if s.ProviderID == "claude_code" {
-					continue // already covered by conversation events
+				if covered[s.ProviderID] {
+					continue
 				}
 				if provider != "" && s.ProviderID != provider {
 					continue
@@ -175,7 +211,7 @@ func gatherReportEvents(kind report.Kind, f *reportFlags) ([]report.Event, strin
 		}
 	}
 
-	return events, note, nil
+	return events, strings.Join(notes, "; "), nil
 }
 
 // claudeCodeConversationEvents maps Claude Code's per-turn usage stats into the

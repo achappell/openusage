@@ -35,7 +35,7 @@ func buildBlocks(events []Event, opts Options) Report {
 
 	rep := Report{Kind: KindBlocks}
 	if len(src) == 0 {
-		rep.Note = "no conversation events (blocks require Claude Code logs)"
+		rep.Note = "no per-turn usage events (blocks need a local-log provider such as Claude Code, Codex, Gemini CLI, Cursor or OpenCode)"
 		finalizeTotals(&rep)
 		return rep
 	}
