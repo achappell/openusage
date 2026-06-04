@@ -47,3 +47,31 @@ func TestEstimateUsageCost_ZeroDeltaReturnsZero(t *testing.T) {
 		t.Errorf("estimateUsageCost on zero delta = %f, want 0", got)
 	}
 }
+
+// TestEstimateUsageCost_PassesContextLenForTier locks in the cost-accuracy fix
+// for the Gemini provider.
+func TestEstimateUsageCost_PassesContextLenForTier(t *testing.T) {
+	prev := priceLookup
+	var gotCtx int
+	aboveInput := 2.5
+	priceLookup = func(_ context.Context, _ string, ctxLen int) (*pricing.Price, error) {
+		gotCtx = ctxLen
+		return &pricing.Price{
+			Source:               pricing.SourceHardcoded,
+			InputCostPerMillion:  1.25,
+			OutputCostPerMillion: 5.0,
+			Tiers:                pricing.TierOverrides{Above128k: &pricing.TierRates{InputCostPerMillion: &aboveInput}},
+		}, nil
+	}
+	t.Cleanup(func() { priceLookup = prev })
+
+	delta := tokenUsage{InputTokens: 200_000, CachedInputTokens: 0, TotalTokens: 200_000}
+	got := estimateUsageCost("gemini-2.5-pro", delta)
+	if gotCtx != 200_000 {
+		t.Fatalf("ctxLen passed = %d, want 200000", gotCtx)
+	}
+	want := 200_000 * aboveInput / 1_000_000
+	if math.Abs(got-want) > 1e-6 {
+		t.Errorf("estimateUsageCost = %.6f, want %.6f", got, want)
+	}
+}

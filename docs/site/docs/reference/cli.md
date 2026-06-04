@@ -13,9 +13,15 @@ The `openusage` binary is the dashboard, the daemon, the hook receiver, and the 
 openusage                                       # run the dashboard (default)
 openusage version                               # print version and build info
 openusage detect [--all]                        # print credential auto-detection report
+openusage daily|weekly|monthly [flags]          # headless usage/cost report by period
+openusage session [flags]                        # usage/cost grouped by Claude Code session
+openusage blocks [flags]                          # usage by 5-hour billing block + burn rate
+openusage statusline [flags]                     # one-line status bar for Claude Code
 openusage telemetry hook <source> [flags]       # forward an event from a tool hook
 openusage telemetry daemon <subcommand> [flags] # daemon lifecycle
 openusage integrations <subcommand> [flags]     # tool integration management
+openusage export [flags]                         # export current snapshots (JSON/CSV)
+openusage pricing <model> [flags]                # resolve model pricing
 openusage hub [flags]                           # aggregate snapshots from multiple machines
 openusage hub-view <url> [flags]                # read-only TUI over a remote hub
 ```
@@ -50,6 +56,105 @@ openusage detect --all      # also list every registered provider, even those al
 ```
 
 Tokens are masked (`first4...last4`); nothing is written to disk. Use this to debug "why doesn't OpenUsage see my key?" before opening an issue. See [Auto-detection](../concepts/auto-detection.md) for the full source order.
+
+## `openusage daily` / `weekly` / `monthly` / `session` / `blocks`
+
+Headless usage and cost reports printed to stdout as an aligned table or, with
+`--json`, as machine-readable JSON. They reuse the same local parsing and
+pricing as the dashboard, so you can script spend tracking in CI without
+running the TUI.
+
+```
+openusage daily [flags]
+openusage weekly [flags]
+openusage monthly [flags]
+openusage session [flags]
+openusage blocks [flags]
+```
+
+- `daily` / `weekly` / `monthly` aggregate **every configured provider**. Claude
+  Code comes from its conversation logs at full fidelity (per-model cost,
+  sessions); other providers come from their daily cost series via a snapshot
+  poll.
+- `session` groups Claude Code usage by conversation session.
+- `blocks` groups Claude Code usage into 5-hour billing windows. The active
+  block shows a burn rate (`$/hour`) and a projected end-of-block cost.
+
+`session` and `blocks` read Claude Code conversation logs, which are the only
+source with the per-message timestamps those views require.
+
+### Flags
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--json` | off | Emit JSON instead of a table. |
+| `--since YYYY-MM-DD` | (none) | Only include usage on/after this date. |
+| `--until YYYY-MM-DD` | (none) | Only include usage on/before this date (inclusive). |
+| `--breakdown`, `-b` | off | Add a per-model breakdown under each row. |
+| `--provider ID` | (all) | Limit to a single provider id (e.g. `claude_code`). |
+| `--project NAME` | (all) | Limit to a single project/workspace label. |
+| `--mode MODE` | `calculate` | Cost mode: `calculate` (recompute from tokens), `display` (trust the cost recorded in the logs), or `auto` (logged cost when present, else recompute). |
+| `--offline` | off | Skip network pricing lookups; use embedded rates. |
+| `--top-models N` | `0` (all) | Cap the models shown per breakdown row. |
+| `--source` | `auto` | (`daily`/`weekly`/`monthly`) Snapshot source for non-Claude providers: `auto`, `direct`, or `daemon`. |
+| `--week-start` | `monday` | (`weekly`) Week boundary: `monday` or `sunday`. |
+
+Costs are API-equivalent estimates derived from token counts, not subscription
+charges.
+
+### Examples
+
+```bash
+openusage daily                              # unified daily spend, all providers
+openusage daily --provider claude_code --offline   # fast, local-only
+openusage monthly --json                     # machine-readable monthly totals
+openusage blocks                             # billing blocks with burn rate
+openusage session --since 2026-05-01 -b      # sessions since May, per-model
+```
+
+## `openusage statusline`
+
+Renders a single status line for the Claude Code status bar. Claude Code pipes
+the active session JSON to this command on stdin; the output summarizes the
+current model, session / today / active-block cost, the burn rate, and
+context-window usage.
+
+```
+openusage statusline [flags]
+openusage statusline --install      # wire into ~/.claude/settings.json
+openusage statusline --uninstall    # remove it again
+```
+
+It runs offline by default (embedded pricing) so it responds instantly.
+
+### Flags
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--offline` | on | Use embedded pricing and skip network lookups. Pass `--offline=false` for live pricing. |
+| `--mode MODE` | `calculate` | Cost mode: `calculate`, `display`, or `auto`. |
+| `--color` | on | Colorize the output with ANSI escapes. |
+| `--context-medium PCT` | `50` | Context-% threshold for the yellow warning color. |
+| `--context-high PCT` | `80` | Context-% threshold for the red warning color. |
+| `--install` | off | Add the statusLine block to `~/.claude/settings.json` (creates a `.bak` backup, preserves other keys). |
+| `--uninstall` | off | Remove the openusage statusLine from `~/.claude/settings.json`. |
+
+`--install` honors the `CLAUDE_SETTINGS_FILE` override and only removes a
+statusLine it manages, leaving any third-party statusLine untouched.
+
+### Manual wiring
+
+If you prefer to edit `~/.claude/settings.json` by hand:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "openusage statusline",
+    "padding": 0
+  }
+}
+```
 
 ## `openusage telemetry hook`
 

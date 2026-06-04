@@ -28,11 +28,15 @@ func estimateUsageCost(model string, delta tokenUsage) float64 {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), priceLookupTimeout)
 	defer cancel()
-	p, err := priceLookup(ctx, model, 0)
+	// contextLen is the request's prompt size (input + cached input). Gemini
+	// charges higher rates above 128k/200k context, so feed it to the pricing
+	// layer to pick the right tier override instead of the base rate.
+	ctxLen := delta.InputTokens + delta.CachedInputTokens
+	p, err := priceLookup(ctx, model, ctxLen)
 	if err != nil || p == nil {
 		return 0
 	}
-	return pricing.Estimate(p, 0, pricing.Usage{
+	return pricing.Estimate(p, ctxLen, pricing.Usage{
 		InputTokens:     delta.InputTokens,
 		OutputTokens:    delta.OutputTokens,
 		CacheReadTokens: delta.CachedInputTokens,

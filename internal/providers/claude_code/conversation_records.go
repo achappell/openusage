@@ -21,6 +21,7 @@ type conversationRecord struct {
 	sourcePath string
 	content    []jsonlContent
 	agentID    string
+	costUSD    *float64 // pre-computed cost from the JSONL entry, if present
 }
 
 func parseConversationRecords(path string) []conversationRecord {
@@ -74,6 +75,7 @@ func parseConversationRecords(path string) []conversationRecord {
 			sourcePath: path,
 			content:    entry.Message.Content,
 			agentID:    agentLabel,
+			costUSD:    entry.CostUSD,
 		})
 	}
 	return mergeStreamingDuplicates(records)
@@ -109,6 +111,13 @@ func mergeStreamingDuplicates(records []conversationRecord) []conversationRecord
 			// the first record we encountered.
 			if rec.timestamp.Before(out[existingIdx].timestamp) {
 				out[existingIdx].timestamp = rec.timestamp
+			}
+			// Keep the largest reported cost across the streamed partials so
+			// the "display"/"auto" cost modes match the final turn cost.
+			if rec.costUSD != nil {
+				if out[existingIdx].costUSD == nil || *rec.costUSD > *out[existingIdx].costUSD {
+					out[existingIdx].costUSD = rec.costUSD
+				}
 			}
 			continue
 		}

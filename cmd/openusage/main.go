@@ -49,6 +49,10 @@ func main() {
 	root.AddCommand(newExportCommand())
 	root.AddCommand(newHubCommand())
 	root.AddCommand(newHubViewCommand())
+	root.AddCommand(newStatuslineCommand())
+	for _, c := range newReportCommands() {
+		root.AddCommand(c)
+	}
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

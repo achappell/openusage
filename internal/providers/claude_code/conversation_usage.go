@@ -142,20 +142,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		}
 		return "main"
 	}
-	normalizeProject := func(cwd, sourcePath string) string {
-		if cwd != "" {
-			base := filepath.Base(cwd)
-			if base != "" && base != "." && base != string(filepath.Separator) {
-				return sanitizeModelName(base)
-			}
-			return sanitizeModelName(cwd)
-		}
-		dir := filepath.Base(filepath.Dir(sourcePath))
-		if dir == "" || dir == "." {
-			return "unknown"
-		}
-		return sanitizeModelName(dir)
-	}
+	normalizeProject := conversationProjectLabel
 	for _, fpath := range jsonlFiles {
 		allUsages = append(allUsages, p.cachedParseConversationRecords(fpath, fileInfos[fpath])...)
 	}

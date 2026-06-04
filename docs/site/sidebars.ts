@@ -134,6 +134,7 @@ const sidebars: SidebarsConfig = {
         'guides/team-tracking',
         'guides/cost-attribution',
         'guides/usage-projections',
+        'guides/cli-reports',
         'guides/headless-servers',
         'guides/multi-machine',
       ],

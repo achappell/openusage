@@ -35,6 +35,23 @@ func Run(opts Options) error {
 	return r.run(context.Background(), opts)
 }
 
+// Collect resolves the requested source and returns the current usage
+// snapshots without encoding them. It is the reusable headless data path
+// behind both `openusage export` and the report subcommands. The returned
+// Source reflects what was actually used (SourceAuto may resolve to either
+// daemon or direct).
+func Collect(ctx context.Context, src Source) ([]core.UsageSnapshot, Source, error) {
+	if src == "" {
+		src = SourceAuto
+	}
+	switch src {
+	case SourceAuto, SourceDirect, SourceDaemon:
+	default:
+		return nil, src, fmt.Errorf("export: unsupported source %q (use auto, direct, or daemon)", src)
+	}
+	return newRunner(Options{Source: src}).collect(ctx, src)
+}
+
 func newRunner(opts Options) *runner {
 	stderr := opts.Stderr
 	if stderr == nil {

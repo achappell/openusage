@@ -47,3 +47,33 @@ func TestEstimateUsageCost_ZeroDeltaReturnsZero(t *testing.T) {
 		t.Errorf("estimateUsageCost on zero delta = %f, want 0", got)
 	}
 }
+
+// TestEstimateUsageCost_PassesContextLenForTier locks in the cost-accuracy fix:
+// the per-message context length (input + cached input) must reach the pricing
+// layer so the long-context tier override applies.
+func TestEstimateUsageCost_PassesContextLenForTier(t *testing.T) {
+	prev := priceLookup
+	var gotCtx int
+	aboveInput := 0.5
+	priceLookup = func(_ context.Context, _ string, ctxLen int) (*pricing.Price, error) {
+		gotCtx = ctxLen
+		return &pricing.Price{
+			Source:               pricing.SourceHardcoded,
+			InputCostPerMillion:  1.0,
+			OutputCostPerMillion: 2.0,
+			Tiers:                pricing.TierOverrides{Above200k: &pricing.TierRates{InputCostPerMillion: &aboveInput}},
+		}, nil
+	}
+	t.Cleanup(func() { priceLookup = prev })
+
+	delta := tokenUsage{InputTokens: 250_000, CachedInputTokens: 50_000, TotalTokens: 300_000}
+	got := estimateUsageCost("gpt-5-codex", delta)
+	if gotCtx != 300_000 {
+		t.Fatalf("ctxLen passed = %d, want 300000", gotCtx)
+	}
+	// input billed at the >200k tier rate (0.5/M) + cached read at base 0.
+	want := 250_000 * aboveInput / 1_000_000
+	if math.Abs(got-want) > 1e-6 {
+		t.Errorf("estimateUsageCost = %.6f, want %.6f", got, want)
+	}
+}

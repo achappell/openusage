@@ -176,6 +176,11 @@ type jsonlEntry struct {
 	Subtype   string    `json:"subtype,omitempty"`
 	Version   string    `json:"version,omitempty"`
 	CWD       string    `json:"cwd,omitempty"`
+	// CostUSD is the pre-computed cost Claude Code occasionally records on the
+	// entry. It powers the "display"/"auto" cost modes used by the headless
+	// report subcommands; the default "calculate" mode ignores it and recomputes
+	// from tokens.
+	CostUSD *float64 `json:"costUSD,omitempty"`
 }
 
 type jsonlMsg struct {
@@ -273,8 +278,13 @@ func estimateCost(model string, u *jsonlUsage) float64 {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), priceLookupTimeout)
 	defer cancel()
-	if p, err := priceLookup(ctx, model, 0); err == nil && p != nil {
-		return pricing.Estimate(p, 0, pricing.Usage{
+	// contextLen is the request's prompt size (input + cache tokens). Anthropic
+	// charges higher long-context rates above 200k tokens, so feed it to the
+	// pricing layer to select the right tier override instead of always using
+	// the base rate.
+	ctxLen := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	if p, err := priceLookup(ctx, model, ctxLen); err == nil && p != nil {
+		return pricing.Estimate(p, ctxLen, pricing.Usage{
 			InputTokens:      u.InputTokens,
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadInputTokens,

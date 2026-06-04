@@ -28,11 +28,15 @@ func estimateUsageCost(model string, delta tokenUsage) float64 {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), priceLookupTimeout)
 	defer cancel()
-	p, err := priceLookup(ctx, model, 0)
+	// contextLen is the request's prompt size (input + cached input). Pricing
+	// applies higher long-context tier rates above the model's breakpoint, so
+	// feed it instead of always charging the base rate.
+	ctxLen := delta.InputTokens + delta.CachedInputTokens
+	p, err := priceLookup(ctx, model, ctxLen)
 	if err != nil || p == nil {
 		return 0
 	}
-	return pricing.Estimate(p, 0, pricing.Usage{
+	return pricing.Estimate(p, ctxLen, pricing.Usage{
 		InputTokens:     delta.InputTokens,
 		OutputTokens:    delta.OutputTokens,
 		CacheReadTokens: delta.CachedInputTokens,
