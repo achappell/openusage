@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/export"
 	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
@@ -189,7 +190,28 @@ func gatherReportEvents(kind report.Kind, f *reportFlags) ([]report.Event, strin
 		events = append(events, report.FromTelemetry(evs, p.ID(), cost)...)
 	}
 
-	// 3. Snapshot fallback for the remaining providers (periodic reports only).
+	// 3. File-based providers exposing itemized usage (no telemetry source).
+	for _, p := range providers.AllProviders() {
+		if covered[p.ID()] {
+			continue
+		}
+		src, ok := p.(core.ItemizedUsageProvider)
+		if !ok {
+			continue
+		}
+		if provider != "" && p.ID() != provider {
+			continue
+		}
+		evs, err := src.ItemizedUsage()
+		covered[p.ID()] = true
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("%s usage unavailable: %v", p.ID(), err))
+			continue
+		}
+		events = append(events, report.FromItemized(evs, cost)...)
+	}
+
+	// 4. Snapshot fallback for the remaining providers (periodic reports only).
 	periodic := kind == report.KindDaily || kind == report.KindWeekly || kind == report.KindMonthly
 	if periodic {
 		ctx := context.Background()
