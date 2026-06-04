@@ -1,6 +1,7 @@
 package report
 
 import (
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
@@ -61,4 +62,38 @@ func derefInt(p *int64) int {
 		return 0
 	}
 	return int(*p)
+}
+
+// FromItemized maps a provider's itemized usage events (from
+// core.ItemizedUsageProvider) into report events. Cost comes from the event
+// when the source recorded one; otherwise it is computed from tokens via cost.
+func FromItemized(events []core.UsageEvent, cost CostFunc) []Event {
+	out := make([]Event, 0, len(events))
+	for _, e := range events {
+		c := e.CostUSD
+		if !e.HasCost {
+			if cost != nil {
+				c = cost(e.Model, e.InputTokens, e.OutputTokens, e.CacheReadTokens, e.CacheCreationTokens, e.ReasoningTokens)
+			} else {
+				c = 0
+			}
+		}
+		if e.InputTokens+e.OutputTokens+e.CacheReadTokens+e.CacheCreationTokens+e.ReasoningTokens == 0 && c == 0 {
+			continue
+		}
+		out = append(out, Event{
+			Time:        e.Time,
+			Provider:    e.ProviderID,
+			Model:       e.Model,
+			Project:     e.Project,
+			Session:     e.Session,
+			Input:       e.InputTokens,
+			Output:      e.OutputTokens,
+			CacheRead:   e.CacheReadTokens,
+			CacheCreate: e.CacheCreationTokens,
+			Reasoning:   e.ReasoningTokens,
+			Cost:        c,
+		})
+	}
+	return out
 }

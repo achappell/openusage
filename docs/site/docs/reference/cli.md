@@ -72,16 +72,20 @@ openusage session [flags]
 openusage blocks [flags]
 ```
 
-- `daily` / `weekly` / `monthly` aggregate **every configured provider**. Claude
-  Code comes from its conversation logs at full fidelity (per-model cost,
-  sessions); other providers come from their daily cost series via a snapshot
+- `daily` / `weekly` / `monthly` aggregate **every configured provider**. Local
+  tools come from their on-disk logs at full fidelity (per-model cost,
+  sessions); remote API platforms come from their daily spend via a snapshot
   poll.
-- `session` groups Claude Code usage by conversation session.
-- `blocks` groups Claude Code usage into 5-hour billing windows. The active
-  block shows a burn rate (`$/hour`) and a projected end-of-block cost.
+- `session` groups usage by conversation session.
+- `blocks` groups usage into 5-hour billing windows. The active block shows a
+  burn rate (`$/hour`) and a projected end-of-block cost.
 
-`session` and `blocks` read Claude Code conversation logs, which are the only
-source with the per-message timestamps those views require.
+`session` and `blocks` cover every local provider that records per-turn (or
+per-session) timestamps — Claude Code, Codex, Gemini CLI, Copilot, Cursor,
+OpenCode, Ollama, Amp, Codebuff, OpenClaw, Roo Code, Kilo Code, Crush, Goose,
+Hermes, Zed, Droid and Kiro. Remote API platforms appear only in the periodic
+reports. Tools that record tokens but no cost have it computed from tokens via
+the pricing layer (online).
 
 ### Flags
 
