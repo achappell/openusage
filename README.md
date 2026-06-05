@@ -78,6 +78,19 @@ What each report can show, by provider:
 
 Remote API platforms (OpenAI, Anthropic, OpenRouter, …) appear in the periodic reports only — they expose no per-turn data. See the [headless reports & statusline guide](docs/site/docs/guides/cli-reports.md) for the full matrix and flags.
 
+### Add to tmux
+
+OpenUsage also renders a tmux status segment for the active AI tool, with 12 built-in presets and full theming.
+
+```bash
+openusage tmux install --write                 # writes a sentinel-bracketed block
+tmux source-file ~/.config/tmux/tmux.conf      # reload
+openusage tmux --preset claude-focused         # try other presets
+openusage tmux doctor                          # diagnose if something is off
+```
+
+See the [tmux integration guide](docs/site/docs/guides/tmux-integration.md) for the format grammar, theming, and watch-mode alerts.
+
 ## Track coding agent usage across multiple platforms
 
 Native dashboards show one provider at a time. OpenUsage gives you one local-first view across coding agents, API platforms, and local runtimes so you can answer:

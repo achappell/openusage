@@ -135,6 +135,7 @@ const sidebars: SidebarsConfig = {
         'guides/cost-attribution',
         'guides/usage-projections',
         'guides/cli-reports',
+        'guides/tmux-integration',
         'guides/headless-servers',
         'guides/multi-machine',
       ],

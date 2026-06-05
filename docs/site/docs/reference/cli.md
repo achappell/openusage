@@ -17,6 +17,7 @@ openusage daily|weekly|monthly [flags]          # headless usage/cost report by 
 openusage session [flags]                        # usage/cost grouped by Claude Code session
 openusage blocks [flags]                          # usage by 5-hour billing block + burn rate
 openusage statusline [flags]                     # one-line status bar for Claude Code
+openusage tmux [subcommand] [flags]              # tmux status bar integration
 openusage telemetry hook <source> [flags]       # forward an event from a tool hook
 openusage telemetry daemon <subcommand> [flags] # daemon lifecycle
 openusage integrations <subcommand> [flags]     # tool integration management
@@ -159,6 +160,128 @@ If you prefer to edit `~/.claude/settings.json` by hand:
   }
 }
 ```
+
+## `openusage tmux`
+
+Renders a one-line tmux status segment for the active AI tool. Picks the most recently used local provider (recency then priority order) and renders the `compact` preset by default. The renderer self-times out at 800ms so a slow daemon can never freeze tmux.
+
+```
+openusage tmux                                 # render compact preset
+openusage tmux --preset claude-focused
+openusage tmux --format '{tool} {today_cost:money}'
+openusage tmux --segment cost
+openusage tmux --json
+```
+
+See the [tmux integration guide](../guides/tmux-integration.md) for the full template grammar, the preset gallery, and theming.
+
+### Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--preset NAME` | `compact` | Named preset (see `openusage tmux presets`). |
+| `--format STR` | (none) | Custom template. Overrides `--preset`. |
+| `--segment NAME` | (none) | Render a single named segment. |
+| `--provider ID` | (auto) | Pin a provider id. Skips active-tool detection. |
+| `--strategy LIST` | `recency,priority` | Comma-separated active-tool detection strategies. |
+| `--color-mode MODE` | `truecolor` | `truecolor`, `256`, `ansi`, or `none`. |
+| `--no-color` | off | Equivalent to `--color-mode none`. |
+| `--no-truecolor` | off | Downgrade to 256-color output. |
+| `--glyphs TIER` | per preset | `ascii`, `unicode`, or `nerdfont`. |
+| `--theme NAME` | (inherits) | Override the configured theme for this invocation. |
+| `--source MODE` | `auto` | Snapshot source: `auto`, `daemon`, `direct`. |
+| `--max-runtime DURATION` | `800ms` | Self-kill budget so tmux never blocks. |
+| `--raw` | off | Force tmux-format output even when stdout is a TTY. |
+| `--json` | off | Emit structured JSON. |
+| `--no-cache` | off | Bypass the active-tool detection cache (2s TTL). |
+
+`--preset`, `--format`, `--segment`, and `--json` are mutually exclusive.
+
+### `tmux install`
+
+Prints (or writes, with `--write`) a sentinel-bracketed snippet that wires the renderer into your tmux config. The helper looks for `$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`, then `~/.tmux.conf`. With `--write` and no existing config, it creates `~/.config/tmux/tmux.conf`.
+
+```
+openusage tmux install                          # print snippet
+openusage tmux install --write                  # write to tmux.conf with .bak backup
+openusage tmux install --write --position both --bind-popup u
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--write` | off | Apply to tmux.conf. Creates a `.bak` of any existing content. |
+| `--position SIDE` | `right` | `left`, `right`, or `both`. |
+| `--preset NAME` | `compact` | Embedded preset to wire in. |
+| `--interval N` | 5 | Sets `status-interval`. |
+| `--right-length N` | 200 | Sets `status-right-length`. |
+| `--left-length N` | 80 | Sets `status-left-length`. |
+| `--bind-popup KEY` | (none) | Bind a key to `display-popup -E openusage` (tmux 3.2+). |
+| `--bind-refresh KEY` | (none) | Bind a key to refresh the status bar on demand. |
+| `--binary PATH` | (auto) | Override the openusage binary path in the snippet. |
+
+Re-running `install --write` replaces the existing sentinel block in place; nothing outside the block is changed.
+
+### `tmux uninstall`
+
+```
+openusage tmux uninstall
+```
+
+Removes the sentinel-bracketed block from the tmux config, takes a `.bak`, and clears the integration entry in settings.json. Leaves the file in place even if newly empty.
+
+### `tmux presets`
+
+Lists the 12 built-in presets with a sample line for each.
+
+```
+openusage tmux presets
+openusage tmux presets --show claude-focused    # dump one preset as JSON
+```
+
+### `tmux variables`
+
+Lists the variables `--format` accepts: snapshot attributes (`tool`, `provider`, `account`, `model`), built-in segments, and semantic aliases.
+
+```
+openusage tmux variables
+openusage tmux variables --markdown             # markdown table
+openusage tmux variables --provider claude_code # scope hint
+```
+
+### `tmux doctor`
+
+Diagnoses tmux version, `$TMUX` env var, truecolor advertisement, daemon socket reachability, the currently detected active provider, and whether your tmux.conf already has the openusage block.
+
+```
+openusage tmux doctor
+```
+
+### `tmux preview`
+
+Renders the status line with ANSI escapes (rather than tmux `#[...]` tokens) so you can preview the output in a regular terminal.
+
+```
+openusage tmux preview --preset compact
+```
+
+Accepts the same `--preset`, `--format`, `--segment`, `--provider`, `--strategy`, `--color-mode`, `--glyphs`, `--theme`, and `--source` flags as the default command.
+
+### `tmux watch`
+
+Foreground push-alert loop. Polls the daemon (or direct snapshots) and on a configured threshold cross calls `tmux display-message` and `tmux refresh-client -S`. Thresholds and cooldown live in `settings.tmux.alerts`.
+
+```
+openusage tmux watch
+openusage tmux watch --background --alert-mode both
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--background` | off | Write a pidfile so a second invocation replaces the first. |
+| `--alert-mode MODE` | from settings | `message`, `bell`, `both`, `none`. |
+| `--interval DURATION` | 5s | Poll interval. |
+
+Pidfile location: `~/.cache/openusage/tmux-watch.pid`.
 
 ## `openusage telemetry hook`
 
