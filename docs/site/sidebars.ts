@@ -11,6 +11,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'getting-started/install',
         'getting-started/quickstart',
+        'getting-started/ways-to-use',
         'getting-started/first-run',
         'getting-started/upgrade',
         'getting-started/uninstall',

@@ -1,9 +1,18 @@
 ---
-title: tmux integration
-description: A first-class tmux status bar for OpenUsage. Provider-agnostic, themed, configurable, and impossible to wedge.
+title: tmux integration — Claude Code, Codex & Cursor usage in your status bar
+description: Show Claude Code, Codex, Cursor, Copilot, and OpenRouter usage (cost, quota, burn rate) in your tmux status bar with OpenUsage — an interactive installer, real provider icons, and full theming.
+keywords:
+  - tmux ai usage
+  - claude code tmux
+  - claude code tmux status bar
+  - tmux status bar ai cost
+  - codex cursor tmux usage
+  - openusage tmux
 ---
 
 # tmux integration
+
+> Show your **Claude Code, Codex, Cursor, Copilot, and OpenRouter** usage — cost, quota, burn rate, and the active tool — right in your **tmux status bar**.
 
 OpenUsage ships a `tmux` subcommand that renders a one-line status segment of your current AI tool usage. It is provider-agnostic (it picks the most-recently-used local tool), themed against the same 18-theme palette as the dashboard, and offers four output shapes:
 

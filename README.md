@@ -80,16 +80,23 @@ Remote API platforms (OpenAI, Anthropic, OpenRouter, …) appear in the periodic
 
 ### Add to tmux
 
-OpenUsage also renders a tmux status segment for the active AI tool, with 12 built-in presets and full theming.
+Show your Claude Code, Codex, Cursor, Copilot, and OpenRouter usage — cost, quota, burn rate, and the active tool — right in your **tmux status bar**. Run the interactive installer (position, preset, optional real provider icons), then reload tmux:
 
 ```bash
-openusage tmux install --write                 # writes a sentinel-bracketed block
+openusage tmux install                         # interactive wizard: position, preset, icons
 tmux source-file ~/.config/tmux/tmux.conf      # reload
-openusage tmux --preset claude-focused         # try other presets
+```
+
+It renders e.g. `🤖 5h 15% $6.79/today`, with the icon tinted in the provider's brand color. Want real provider logos instead of emoji? The wizard offers to install a bundled icon font and configure your terminal — see [provider icons](docs/site/docs/guides/tmux-integration.md#provider-icons-custom-font).
+
+```bash
+openusage tmux install --write                 # non-interactive (scripting): just write the snippet
+openusage tmux --preset claude-focused         # preview other presets (12 built-in)
+openusage tmux font setup                       # configure icons for kitty/Ghostty/WezTerm
 openusage tmux doctor                          # diagnose if something is off
 ```
 
-See the [tmux integration guide](docs/site/docs/guides/tmux-integration.md) for the format grammar, theming, and watch-mode alerts.
+See the [tmux integration guide](docs/site/docs/guides/tmux-integration.md) for the format grammar, theming, the icon font, and watch-mode alerts.
 
 ## Track coding agent usage across multiple platforms
 
