@@ -82,7 +82,7 @@ That is the entire setup. OpenUsage auto-detects installed AI tools and API keys
 
 ## Help
 
-- [FAQ](./faq.md)
+- [FAQ](./faq.mdx)
 - [Troubleshooting](./troubleshooting/common-issues.md)
 - [GitHub issues](https://github.com/janekbaraniewski/openusage/issues)
 

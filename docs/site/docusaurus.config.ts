@@ -42,6 +42,74 @@ const config: Config = {
     posthogHost: process.env.POSTHOG_HOST ?? '',
   },
 
+  // Site-level structured data (JSON-LD), injected into every docs page.
+  // Uses the same @id URIs as the marketing site (openusage.sh) so search and
+  // answer engines consolidate both into one entity. Structured data is a
+  // measured AEO signal: pages that pair clean structure with schema earn
+  // materially more AI citations. Per-page schema (FAQPage, etc.) is added in
+  // the relevant page via @docusaurus/Head; BreadcrumbList is emitted
+  // automatically by Docusaurus.
+  headTags: [
+    {
+      tagName: 'script',
+      attributes: {type: 'application/ld+json'},
+      innerHTML: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@graph': [
+          {
+            '@type': 'Organization',
+            '@id': 'https://openusage.sh/#organization',
+            name: 'OpenUsage',
+            alternateName: 'OpenUsage.sh',
+            url: 'https://openusage.sh/',
+            logo: {
+              '@type': 'ImageObject',
+              url: 'https://openusage.sh/brand/og.png',
+            },
+            description:
+              'OpenUsage.sh is an open-source, local-first terminal dashboard for tracking spend, quotas, and rate limits across AI coding tools.',
+            founder: {
+              '@type': 'Person',
+              name: 'Jan Baraniewski',
+              url: 'https://baraniewski.com',
+            },
+            sameAs: ['https://github.com/janekbaraniewski/openusage'],
+          },
+          {
+            '@type': 'WebSite',
+            '@id': 'https://openusage.sh/#website',
+            name: 'OpenUsage.sh',
+            url: 'https://openusage.sh/',
+            publisher: {'@id': 'https://openusage.sh/#organization'},
+            inLanguage: 'en',
+          },
+          {
+            '@type': 'SoftwareApplication',
+            '@id': 'https://openusage.sh/#software',
+            name: 'OpenUsage',
+            alternateName: 'OpenUsage.sh',
+            applicationCategory: 'DeveloperApplication',
+            applicationSubCategory:
+              'Quota tracker and usage dashboard for coding agents',
+            operatingSystem: 'macOS, Linux, Windows',
+            isAccessibleForFree: true,
+            publisher: {'@id': 'https://openusage.sh/#organization'},
+            isPartOf: {'@id': 'https://openusage.sh/#website'},
+            description:
+              'OpenUsage is an open-source terminal dashboard that tracks spend, quotas, rate limits, model usage, and local telemetry across the AI coding tools you actually use. Supports Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, and a growing list of other providers.',
+            offers: {'@type': 'Offer', price: '0', priceCurrency: 'USD'},
+            programmingLanguage: 'Go',
+            codeRepository: 'https://github.com/janekbaraniewski/openusage',
+            downloadUrl: 'https://github.com/janekbaraniewski/openusage/releases',
+            license:
+              'https://github.com/janekbaraniewski/openusage/blob/main/LICENSE',
+            sameAs: ['https://github.com/janekbaraniewski/openusage'],
+          },
+        ],
+      }),
+    },
+  ],
+
   themes: [
     '@docusaurus/theme-mermaid',
     [

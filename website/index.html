@@ -41,10 +41,50 @@
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
+      "@graph": [
+      {
+      "@type": "Organization",
+      "@id": "https://openusage.sh/#organization",
+      "name": "OpenUsage",
+      "alternateName": "OpenUsage.sh",
+      "url": "https://openusage.sh/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://openusage.sh/brand/og.png"
+      },
+      "description": "OpenUsage.sh is an open-source, local-first terminal dashboard for tracking spend, quotas, and rate limits across AI coding tools.",
+      "founder": {
+        "@type": "Person",
+        "name": "Jan Baraniewski",
+        "url": "https://baraniewski.com"
+      },
+      "sameAs": [
+        "https://github.com/janekbaraniewski/openusage"
+      ]
+      },
+      {
+      "@type": "WebSite",
+      "@id": "https://openusage.sh/#website",
+      "name": "OpenUsage.sh",
+      "url": "https://openusage.sh/",
+      "publisher": { "@id": "https://openusage.sh/#organization" },
+      "inLanguage": "en",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://openusage.sh/docs/?q={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+      },
+      {
       "@type": "SoftwareApplication",
       "@id": "https://openusage.sh/#software",
       "name": "OpenUsage",
       "alternateName": "OpenUsage.sh",
+      "publisher": { "@id": "https://openusage.sh/#organization" },
+      "isPartOf": { "@id": "https://openusage.sh/#website" },
       "description": "OpenUsage is an open-source terminal dashboard that tracks spend, quotas, rate limits, model usage, and local telemetry across the AI coding tools you actually use. Supports Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, and a growing list of other providers.",
       "applicationSubCategory": "Quota tracker and usage dashboard for coding agents",
       "keywords": "local quota tracker, coding agent usage tracker, claude code quota tracker, codex cli quota tracker, cursor usage tracker, copilot quota tracker, openrouter spend tracker, terminal ai dashboard",
@@ -81,6 +121,8 @@
         "Detail, compare, and analytics views in the terminal",
         "Dashboard section, graph, and time-window configuration",
         "Keyboard-driven local-first workflow"
+      ]
+      }
       ]
     }
     </script>

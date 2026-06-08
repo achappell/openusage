@@ -3,6 +3,84 @@ title: FAQ
 description: Frequently asked questions about OpenUsage — privacy, cost, platform support, accuracy, and how it compares to other tools.
 ---
 
+import Head from '@docusaurus/Head';
+
+export const faqLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  '@id': 'https://openusage.sh/docs/faq/#faq',
+  mainEntity: [
+    {
+      '@type': 'Question',
+      name: 'Is my data sent anywhere?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'No. OpenUsage is local-first. The only network calls it makes are to the AI provider APIs you have already authenticated to, using your own keys to read your own usage data. There is no telemetry server, no analytics SDK, and no phone-home. The telemetry daemon listens on a local Unix domain socket and is not reachable over the network.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Are my API keys stored anywhere?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'No. Keys are referenced by environment-variable name in the config file (api_key_env). The actual value is read from your shell environment at fetch time and is never written to disk.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Does OpenUsage cost money to run?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'No. OpenUsage is free and open-source (MIT). Provider rate-limit and billing endpoints are free to query; OpenUsage typically makes one or two requests per provider per poll cycle (default 30 seconds), so the cost on your account is rounding error.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'How accurate are the cost estimates?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'For direct API providers (OpenAI, Anthropic, OpenRouter, Mistral, and similar) the spend and credit numbers come straight from the vendor API and match the vendor dashboard. For Claude Code, cost is an API-equivalent estimate computed from local pricing tables and local conversation files, not your subscription charge; use it for relative attribution and trend tracking. Cursor, Codex, Gemini CLI, and Copilot use a mix of vendor APIs and local session files.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'How is OpenUsage different from Langfuse, Helicone, or OpenLLMetry?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Those are app-side observability platforms: you instrument an LLM application you build, send traces to a backend, and analyze them in a team UI. OpenUsage is the inverse — end-user spend monitoring for the human running coding tools. You do not instrument anything; OpenUsage reads what your tools already record. There is no backend, no team dashboard, and no SDK.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'What platforms does OpenUsage run on?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'macOS (the most-tested platform), Linux, and Windows. The terminal UI works in any ANSI terminal, including over SSH. Background collection via the daemon installs as a launchd agent on macOS and a systemd user unit on Linux; on Windows the daemon runs manually.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Why does OpenUsage require CGO?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Two parts of the codebase need a C SQLite library: the Cursor provider reads Cursor local SQLite databases, and the telemetry store uses SQLite for the daemon event store. Both link github.com/mattn/go-sqlite3, which is a CGO package, so building from source needs a C toolchain.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Is OpenUsage open source?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Yes. OpenUsage is MIT licensed and developed in the open at github.com/janekbaraniewski/openusage, maintained by Jan Baraniewski with community contributors.',
+      },
+    },
+  ],
+};
+
+<Head>
+  <script type="application/ld+json">{JSON.stringify(faqLd)}</script>
+</Head>
+
 ## Privacy and data
 
 ### Is my data sent anywhere?
