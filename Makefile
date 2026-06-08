@@ -78,7 +78,7 @@ sync-tools: ## Regenerate all AI tool config files from canonical template
 .PHONY: icon-font
 icon-font: ## Regenerate the provider icon font (internal/tmux/assets/openusage-icons.ttf)
 	@python3 -m venv .venv-font 2>/dev/null || true
-	@.venv-font/bin/pip install --quiet --upgrade fonttools
+	@.venv-font/bin/pip install --quiet 'fonttools==4.63.0'
 	@.venv-font/bin/python scripts/gen-icon-font.py
 
 .PHONY: docs-install
