@@ -21,8 +21,14 @@ are merged into one glyph.
 
 The SVG coordinate system has its origin at the top-left with the y-axis
 pointing down, while fonts place the origin at the baseline with the y-axis
-pointing up. Each outline is therefore scaled by ``upem / 24`` and flipped on Y
-via ``font_y = (24 - svg_y) * scale``.
+pointing up.
+
+Scaling is driven by each glyph's actual *ink* bounding box rather than the
+nominal 24x24 viewBox. These icons carry internal padding, so scaling by the
+viewBox left the rendered glyph well short of the cell. Instead each outline is
+measured (its ink bbox in SVG coordinates) and scaled uniformly so the ink
+height fills ~92% of the em, then centered horizontally and vertically inside
+the em box, keeping aspect ratio.
 
 Usage
 -----
@@ -40,7 +46,9 @@ import xml.etree.ElementTree as ET
 
 try:
     from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.boundsPen import ControlBoundsPen
     from fontTools.pens.cu2quPen import Cu2QuPen
+    from fontTools.pens.recordingPen import RecordingPen
     from fontTools.pens.transformPen import TransformPen
     from fontTools.pens.ttGlyphPen import TTGlyphPen
     from fontTools.svgLib.path import parse_path
@@ -63,6 +71,10 @@ OUTPUT_PATH = os.path.join(REPO_ROOT, "internal", "tmux", "assets", "openusage-i
 
 # SVG viewBox is always 24x24 for these icons.
 SVG_VIEWBOX = 24.0
+
+# Fraction of the em that the ink height should occupy. Leaves a small top and
+# bottom margin so glyphs do not visually touch the cell edges.
+INK_FILL = 0.92
 
 NOTDEF = ".notdef"
 
@@ -90,25 +102,67 @@ def _path_ds(svg_path: str) -> list[str]:
     return ds
 
 
-def _build_glyph(svg_path: str, scale: float) -> "object":
-    """Parse all paths in *svg_path* into a single, Y-flipped TrueType glyph."""
+def _build_glyph(svg_path: str, upem: int) -> "object":
+    """Parse all paths in *svg_path* into a single, ink-filling TrueType glyph.
+
+    The outline is recorded once, measured for its *ink* bounding box in SVG
+    coordinates, then scaled so the ink height fills ``INK_FILL`` of the em and
+    centered inside the em box. The Y axis is flipped (SVG is y-down) and the
+    result is converted to quadratics for the ``glyf`` table.
+    """
     ds = _path_ds(svg_path)
     if not ds:
         raise ValueError(f"no <path> elements found in {svg_path}")
+
+    # Record the raw SVG outline once so we can both measure and replay it.
+    rec = RecordingPen()
+    for d in ds:
+        parse_path(d, rec)
+
+    # Measure the ink bbox in SVG coords (control-point bounds are sufficient
+    # and avoid pulling in a cython dependency for exact bezier extrema).
+    bounds = ControlBoundsPen(None)
+    rec.replay(bounds)
+    if bounds.bounds is None:
+        raise ValueError(f"empty outline in {svg_path}")
+    xmin, ymin, xmax, ymax = bounds.bounds
+    ink_w = xmax - xmin
+    ink_h = ymax - ymin
+    if ink_h <= 0 or ink_w <= 0:
+        raise ValueError(f"degenerate ink bbox in {svg_path}")
+
+    # Uniform scale so the ink HEIGHT maps to INK_FILL * upem, preserving aspect
+    # ratio.
+    scale = (INK_FILL * upem) / ink_h
+
+    # Center the scaled ink inside the em box [0, upem] both axes.
+    scaled_w = ink_w * scale
+    scaled_h = ink_h * scale
+    x_pad = (upem - scaled_w) / 2.0
+    y_pad = (upem - scaled_h) / 2.0
+
+    # Affine mapping svg(x, y) -> font(X, Y), with Y flipped (svg y is down):
+    #   X = scale*(x - xmin) + x_pad
+    #   Y = scale*(ymax - y) + y_pad
+    # In (a, b, c, d, e, f) form (X = a*x + c*y + e ; Y = b*x + d*y + f):
+    #   a = scale, c = 0, e = x_pad - scale*xmin
+    #   b = 0, d = -scale, f = y_pad + scale*ymax
+    transform = (
+        scale,
+        0.0,
+        0.0,
+        -scale,
+        x_pad - scale * xmin,
+        y_pad + scale * ymax,
+    )
 
     pen = TTGlyphPen(None)
     # SVG paths use cubic beziers; TrueType glyf needs quadratics, so convert
     # via Cu2QuPen. Tolerance is in font units (~1 unit at upem=1000 is well
     # below pixel-perceptible at icon sizes).
     cu2qu = Cu2QuPen(pen, max_err=1.0, reverse_direction=True)
-    # font_x = svg_x * scale ; font_y = (24 - svg_y) * scale
-    # As an affine transform applied to (svg_x, svg_y):
-    #   x' = scale*x + 0*y + 0
-    #   y' = 0*x + (-scale)*y + (24*scale)
-    transform = (scale, 0.0, 0.0, -scale, 0.0, SVG_VIEWBOX * scale)
     tpen = TransformPen(cu2qu, transform)
-    for d in ds:
-        parse_path(d, tpen)
+    rec.replay(tpen)
     return pen.glyph()
 
 
@@ -150,8 +204,6 @@ def main() -> int:
         sys.stderr.write("error: manifest has no glyphs\n")
         return 1
 
-    scale = upem / SVG_VIEWBOX
-
     glyph_order = [NOTDEF]
     glyphs = {NOTDEF: _notdef_glyph(upem)}
     advance_widths = {NOTDEF: upem}
@@ -174,7 +226,7 @@ def main() -> int:
         if len(ds) > 1:
             multipath.append(f"{provider} ({svg_name}.svg, {len(ds)} paths)")
 
-        glyphs[glyph_name] = _build_glyph(svg_path, scale)
+        glyphs[glyph_name] = _build_glyph(svg_path, upem)
         advance_widths[glyph_name] = upem
         glyph_order.append(glyph_name)
         cmap[codepoint] = glyph_name
@@ -231,6 +283,18 @@ def main() -> int:
     print(f"  glyphs:     {glyph_count} provider glyphs (+ .notdef)")
     print(f"  codepoints: {len(cmap)} mapped")
     print(f"  size:       {size} bytes ({size / 1024:.1f} KB)")
+
+    # Report each glyph's actual glyf bbox height; it should be ~INK_FILL*upem.
+    glyf = fb.font["glyf"]
+    target = INK_FILL * upem
+    print(f"  glyph ink heights (target ~{target:.0f}):")
+    for name in glyph_order:
+        if name == NOTDEF:
+            continue
+        g = glyf[name]
+        g.recalcBounds(glyf)
+        h = g.yMax - g.yMin if hasattr(g, "yMax") else 0
+        print(f"    - {name:<22} height={h}")
     if multipath:
         print("  multi-path SVGs (merged into one glyph each):")
         for m in multipath:

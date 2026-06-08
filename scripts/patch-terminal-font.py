@@ -17,6 +17,8 @@ import sys
 import xml.etree.ElementTree as ET
 
 from fontTools.ttLib import TTFont
+from fontTools.pens.boundsPen import ControlBoundsPen
+from fontTools.pens.recordingPen import RecordingPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
@@ -77,13 +79,72 @@ def choose_cap_height(font, upem):
     return round(0.7 * upem)
 
 
-def make_transform(scale, xoff, yoff=0.0):
-    # SVG is y-down with origin at top of a 24x24 box. Fonts are y-up from the
-    # baseline. Map svg(x, y) -> (x*scale + xoff, (24 - y)*scale + yoff).
-    #   X = x*scale + xoff
-    #   Y = -y*scale + 24*scale + yoff
-    # Affine (a, b, c, d, e, f): X = a*x + c*y + e ; Y = b*x + d*y + f
-    return (scale, 0.0, 0.0, -scale, xoff, 24.0 * scale + yoff)
+# Fraction of the base font ascender that the ink height should occupy, so
+# icons rise to (near) the top of the line.
+INK_FILL = 0.92
+# Cap horizontal growth: tall logos may exceed the advance, but never by more
+# than this factor, to avoid heavy overlap into neighboring cells.
+MAX_WIDTH_FACTOR = 1.15
+
+
+def record_svg(ds):
+    """Replay every SVG path into a RecordingPen, returning the recording."""
+    rec = RecordingPen()
+    for d in ds:
+        parse_path(d, rec)
+    return rec
+
+
+def ink_transform(rec, ascent, advance):
+    """Build an affine transform that scales the recorded SVG ink to fill the
+    line and centers it.
+
+    The ink bounding box (SVG coords, y-down) is measured, then scaled uniformly
+    so the ink HEIGHT maps to ``INK_FILL * ascent``. The scale is clamped so the
+    ink WIDTH does not exceed ``advance * MAX_WIDTH_FACTOR``. The glyph is
+    centered horizontally on the advance and vertically on the cap band (centered
+    between the baseline and the ascender).
+
+    Returns ``(transform, scaled_w, scaled_h)``.
+    """
+    bounds = ControlBoundsPen(None)
+    rec.replay(bounds)
+    if bounds.bounds is None:
+        raise ValueError("empty outline")
+    xmin, ymin, xmax, ymax = bounds.bounds
+    ink_w = xmax - xmin
+    ink_h = ymax - ymin
+    if ink_w <= 0 or ink_h <= 0:
+        raise ValueError("degenerate ink bbox")
+
+    target_h = INK_FILL * ascent
+    scale = target_h / ink_h
+    # Clamp so the width stays within the cell tolerance.
+    max_w = advance * MAX_WIDTH_FACTOR
+    if ink_w * scale > max_w:
+        scale = max_w / ink_w
+
+    scaled_w = ink_w * scale
+    scaled_h = ink_h * scale
+    # Center horizontally on the advance.
+    x_pad = (advance - scaled_w) / 2.0
+    # Center vertically on the cap band: place the ink so its center sits at
+    # ascent/2, i.e. it spans from near the baseline up toward the ascender.
+    y_pad = (ascent - scaled_h) / 2.0
+
+    # Affine mapping svg(x, y) -> font(X, Y), Y flipped (svg y is down):
+    #   X = scale*(x - xmin) + x_pad
+    #   Y = scale*(ymax - y) + y_pad
+    # In (a, b, c, d, e, f): X = a*x + c*y + e ; Y = b*x + d*y + f
+    transform = (
+        scale,
+        0.0,
+        0.0,
+        -scale,
+        x_pad - scale * xmin,
+        y_pad + scale * ymax,
+    )
+    return transform, scaled_w, scaled_h
 
 
 def add_unique_name(order_set, base_name):
@@ -95,21 +156,19 @@ def add_unique_name(order_set, base_name):
     return name
 
 
-def build_glyf_glyph(ds, transform, advance):
+def build_glyf_glyph(rec, transform, advance):
     tt_pen = TTGlyphPen(None)
     # Cubic -> quadratic conversion, then transform into font units.
     cu2qu = Cu2QuPen(tt_pen, max_err=1.0, reverse_direction=True)
     pen = TransformPen(cu2qu, transform)
-    for d in ds:
-        parse_path(d, pen)
+    rec.replay(pen)
     return tt_pen.glyph()
 
 
-def build_cff_charstring(ds, transform, advance):
+def build_cff_charstring(rec, transform, advance):
     t2_pen = T2CharStringPen(advance, None)
     pen = TransformPen(t2_pen, transform)
-    for d in ds:
-        parse_path(d, pen)
+    rec.replay(pen)
     return t2_pen.getCharString()
 
 
@@ -198,23 +257,17 @@ def main():
     upem = font["head"].unitsPerEm
     advance = choose_advance(font, upem)
     cap_height = choose_cap_height(font, upem)
-    target_height = cap_height
-    scale = target_height / 24.0
-    # Icons are square (24x24). If scaling to cap height would make the glyph
-    # wider than one cell, clamp to the advance so it stays inside the cell.
-    if 24.0 * scale > advance:
-        scale = advance / 24.0
-    glyph_size = 24.0 * scale
-    xoff = (advance - glyph_size) / 2.0
-    # Vertically center the (possibly clamped) icon on the cap-height band.
-    yoff = (cap_height - glyph_size) / 2.0
-    transform = make_transform(scale, xoff, yoff)
+    # Icons are scaled per-glyph by their ink bbox so they fill the line height.
+    # Target ink height is INK_FILL of the base font ascender, so icons rise to
+    # the top of the line ("full character height").
+    ascent = font["hhea"].ascent
 
     with open(args.manifest) as fh:
         manifest = json.load(fh)
 
     order_set = set(font.getGlyphOrder())
     added = 0
+    heights = []  # (name, glyph-height-in-font-units) for reporting
 
     for entry in manifest["glyphs"]:
         provider = entry["provider"]
@@ -234,15 +287,19 @@ def main():
         name = add_unique_name(order_set, "ouicon_" + provider)
         order_set.add(name)
 
+        rec = record_svg(ds)
+        transform, scaled_w, scaled_h = ink_transform(rec, ascent, advance)
+
         if fmt == "glyf":
-            glyph = build_glyf_glyph(ds, transform, advance)
+            glyph = build_glyf_glyph(rec, transform, advance)
             insert_glyf(font, name, glyph, advance)
         else:
-            charstring = build_cff_charstring(ds, transform, advance)
+            charstring = build_cff_charstring(rec, transform, advance)
             insert_cff(font, name, charstring, advance)
 
         register_glyph_order(font, name)
         add_to_cmaps(font, codepoint, name)
+        heights.append((name, round(scaled_h)))
         added += 1
 
     # Keep maxp in sync with the new glyph count.
@@ -254,15 +311,20 @@ def main():
     font.save(args.out)
     size = os.path.getsize(args.out)
 
+    target_h = INK_FILL * ascent
     print("=== patch-terminal-font summary ===")
     print("base format:        %s" % fmt)
     print("upem:               %d" % upem)
     print("advance used:       %d" % advance)
-    print("cap height used:    %d" % cap_height)
-    print("scale (per svg u):  %.4f" % scale)
+    print("cap height:         %d" % cap_height)
+    print("base ascender:      %d" % ascent)
+    print("target ink height:  %.0f (%.0f%% of ascender)" % (target_h, INK_FILL * 100))
     print("original glyphs:    %d" % orig_glyph_count)
     print("glyphs added:       %d" % added)
     print("output:             %s (%d bytes)" % (args.out, size))
+    print("augmented glyph ink heights (font units):")
+    for name, h in heights:
+        print("    - %-22s height=%d" % (name, h))
 
 
 if __name__ == "__main__":
