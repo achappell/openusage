@@ -324,7 +324,17 @@ func (r *renderer) applyModifier(varName, value, op string, args []string) (stri
 		}
 		return value, nil
 	case "icon":
-		return ProviderIcon(value, r.ctx.Glyphs), nil
+		g := ProviderIcon(value, r.ctx.Glyphs)
+		// Custom-font glyphs are scaled to fill the cell height, so they spill
+		// ~1-2 columns wide while the terminal only advances one column — the
+		// next character would draw on top of the icon. Reserve a trailing
+		// column so the metrics never touch the logo. Only do this for providers
+		// that actually have a bundled wide glyph; emoji fallbacks and the other
+		// tiers keep the template's own spacing.
+		if r.ctx.Glyphs == GlyphTierCustomFont && customFontIcon(strings.ToLower(strings.TrimSpace(value))) != "" {
+			g += " "
+		}
+		return g, nil
 	case "tokens":
 		return modTokens(value), nil
 	case "duration":

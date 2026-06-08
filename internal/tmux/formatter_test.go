@@ -1082,3 +1082,34 @@ func TestSegmentModel_FromAttributes(t *testing.T) {
 		t.Errorf("model missing: %q", got)
 	}
 }
+
+// TestIconCustomFontTrailingSpace verifies that custom-font glyphs (which are
+// scaled to fill the cell and so spill past their single advance column) get a
+// reserved trailing column, while emoji fallbacks and the other glyph tiers do
+// not — so metrics never render on top of a wide logo.
+func TestIconCustomFontTrailingSpace(t *testing.T) {
+	c := newTestContext()
+	c.ColorMode = ColorModeNone
+
+	// Provider with a bundled wide glyph, in the custom-font tier: trailing space.
+	c.Glyphs = GlyphTierCustomFont
+	if got := renderOrFail(t, c, "{tool:icon}"); !strings.HasSuffix(got, " ") {
+		t.Errorf("customfont icon for bundled provider = %q, want a trailing space", got)
+	}
+
+	// Provider WITHOUT a bundled glyph degrades to the emoji fallback, which is a
+	// single cell and must NOT get the extra space.
+	c.Provider = "crush"
+	c.Snapshot.ProviderID = "crush"
+	if got := renderOrFail(t, c, "{tool:icon}"); strings.HasSuffix(got, " ") {
+		t.Errorf("emoji-fallback icon = %q, should not get a trailing space", got)
+	}
+
+	// The unicode tier never reserves the column (emoji are one cell).
+	c.Provider = "claude_code"
+	c.Snapshot.ProviderID = "claude_code"
+	c.Glyphs = GlyphTierUnicode
+	if got := renderOrFail(t, c, "{tool:icon}"); strings.HasSuffix(got, " ") {
+		t.Errorf("unicode icon = %q, should not get a trailing space", got)
+	}
+}
