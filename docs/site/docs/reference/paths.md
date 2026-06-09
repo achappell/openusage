@@ -12,6 +12,7 @@ OpenUsage follows the [XDG Base Directory Specification](https://specifications.
 | Path | Purpose | Override |
 |---|---|---|
 | `~/.config/openusage/settings.json` | Main config file. | — |
+| `~/.config/openusage/custom-pricing.json` | User pricing overrides. | `OPENUSAGE_CUSTOM_PRICING`, `XDG_CONFIG_HOME` |
 | `~/.config/openusage/themes/` | External themes directory (scanned for `*.json`). | `OPENUSAGE_THEME_DIR` (extra dirs only) |
 | `~/.config/openusage/hooks/` | Hook scripts installed by `openusage integrations`. | — |
 | `~/.local/state/openusage/` | State directory (DB, socket, spool, logs). | `XDG_STATE_HOME` |
@@ -70,11 +71,24 @@ OpenCode resolves its data directory through the `xdg-basedir` library, which ha
 | Logical path | Resolved |
 |---|---|
 | Config dir | `%APPDATA%\openusage\` |
-| State dir | `%APPDATA%\openusage\state\` |
+| `custom-pricing.json` | `%APPDATA%\openusage\custom-pricing.json` (or `$XDG_CONFIG_HOME\openusage\` if set) |
+| Hooks dir | `%APPDATA%\openusage\hooks\` |
+| State dir | `%APPDATA%\openusage\state\` (or `$XDG_STATE_HOME\openusage\` if set) |
 | Theme dir separator | `;` (semicolon) for `OPENUSAGE_THEME_DIR` |
 
+OpenUsage's own directories live under `%APPDATA%\openusage`. Third-party tool
+directories that OpenUsage reads are resolved the way each tool resolves them,
+which is **not** always the Windows-native location: tools that use the
+`xdg-basedir`/`env-paths` libraries (e.g. OpenCode) read from
+`%USERPROFILE%\.config\<tool>` and `%USERPROFILE%\.local\share\<tool>` on Windows
+too. See the per-tool notes above.
+
 :::note Daemon on Windows
-The launchd / systemd-user service installer is not supported on Windows. You can still run `openusage telemetry daemon run` manually, but there is no auto-start template.
+The launchd / systemd-user service installer is not supported on Windows, and
+the TUI cannot auto-spawn or auto-upgrade a daemon there. Telemetry mode works
+if you start the daemon yourself with `openusage telemetry daemon run` (the TUI
+connects to it over the local socket); a managed Windows-service lifecycle is
+tracked as future work.
 :::
 
 ## Theme search order

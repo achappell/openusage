@@ -19,8 +19,8 @@ OpenUsage reads two kinds of environment variables: **runtime overrides** (debug
 | `OPENUSAGE_THEME_DIR` | Colon-separated list (semicolon on Windows) of extra directories scanned for theme JSON files. See [External themes](../customization/external-themes.md). |
 | `OPENUSAGE_MOONSHOT_STATE_PATH` | Override the path Moonshot's state file is read from. |
 | `OPENUSAGE_CUSTOM_PRICING` | Override the path to `custom-pricing.json` (default: `$XDG_CONFIG_HOME/openusage/custom-pricing.json` or `~/.config/openusage/custom-pricing.json`). See [Custom pricing overrides](./configuration.md#custom-pricing-overrides). |
-| `XDG_CONFIG_HOME` | Override the config base directory (default `~/.config`). |
-| `XDG_STATE_HOME` | Override the state base directory (default `~/.local/state`). |
+| `XDG_CONFIG_HOME` | Honored when resolving `custom-pricing.json` and (on Linux/macOS) the integrations hooks directory. It is **not** honored for `settings.json`, whose directory is fixed at `~/.config/openusage` on Linux/macOS and `%APPDATA%\openusage` on Windows. |
+| `XDG_STATE_HOME` | Override the state base directory (telemetry db/socket/spools). Default `~/.local/state` on Linux/macOS; on Windows the state dir is `%APPDATA%\openusage\state` when this is unset. |
 | `CLAUDE_SETTINGS_FILE` | Override the path to `~/.claude/settings.json`. Used by the `claude_code` provider and integration. |
 | `CODEX_CONFIG_DIR` | Override the path to `~/.codex/`. Used by the `codex` provider and integration. |
 | `CODEBUFF_DATA_DIR` | Additional channel root for the `codebuff` provider, appended to the default `manicode/`, `manicode-dev/`, and `manicode-staging/` channels under `~/.config/`. |
@@ -98,6 +98,17 @@ set -Ux OPENAI_API_KEY sk-...
 ```bash
 OPENUSAGE_DEBUG=1 OPENUSAGE_TELEMETRY_SOCKET=/tmp/ou.sock openusage telemetry daemon run
 ```
+
+### Windows (PowerShell)
+
+On Windows you must set an **environment variable**, not a PowerShell variable. `$OPENAI_API_KEY = "sk-..."` creates a PowerShell variable that OpenUsage cannot see; use `$env:` (current session) or `setx` (persisted to new sessions):
+
+```powershell
+$env:OPENAI_API_KEY = "sk-..."   # current session
+setx OPENAI_API_KEY "sk-..."     # persisted; reopen the terminal to pick it up
+```
+
+Verify with `Get-ChildItem Env:OPENAI_API_KEY` (lists real environment variables). See [Provider not detected](../troubleshooting/provider-not-detected.md#windows--powershell).
 
 ### In a service unit
 

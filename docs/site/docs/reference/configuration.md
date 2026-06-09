@@ -460,7 +460,7 @@ Searched in this order; the first existing file wins:
 
 1. The path in `OPENUSAGE_CUSTOM_PRICING`, if set.
 2. `$XDG_CONFIG_HOME/openusage/custom-pricing.json`, if `XDG_CONFIG_HOME` is set.
-3. `~/.config/openusage/custom-pricing.json`.
+3. The platform config dir: `~/.config/openusage/custom-pricing.json` on Linux/macOS, `%APPDATA%\openusage\custom-pricing.json` on Windows (beside `settings.json`).
 
 ### Format
 
