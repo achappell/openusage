@@ -59,7 +59,11 @@ var opencodeAuthMapping = map[string]struct {
 //   - On macOS we additionally probe ~/Library/Application Support/opencode/
 //     auth.json so users who explicitly pinned to the Apple-native location
 //     still get auto-detected.
-//   - On Windows we honour %APPDATA%/opencode/auth.json.
+//   - On Windows OpenCode resolves its data dir through the `xdg-basedir` JS
+//     package, which has no Windows special-case and therefore writes to
+//     ~/.local/share/opencode/auth.json (see anomalyco/opencode#8235). We probe
+//     that location FIRST, then %LOCALAPPDATA% and %APPDATA% as forward-compat
+//     fallbacks in case upstream switches to the OS-native convention.
 func opencodeAuthPaths() []string {
 	home := homeDir()
 	if home == "" {
@@ -73,8 +77,13 @@ func opencodeAuthPaths() []string {
 
 	switch runtime.GOOS {
 	case "windows":
-		appData := strings.TrimSpace(os.Getenv("APPDATA"))
-		if appData != "" {
+		// Where OpenCode actually writes today: the Linux-style XDG default,
+		// because xdg-basedir does not honour the Windows convention.
+		paths = append(paths, filepath.Join(home, ".local", "share", "opencode", "auth.json"))
+		if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
+			paths = append(paths, filepath.Join(localAppData, "opencode", "auth.json"))
+		}
+		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
 			paths = append(paths, filepath.Join(appData, "opencode", "auth.json"))
 		} else {
 			paths = append(paths, filepath.Join(home, "AppData", "Roaming", "opencode", "auth.json"))

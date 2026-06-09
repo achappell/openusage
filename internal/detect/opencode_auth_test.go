@@ -241,6 +241,52 @@ func TestDetectOpenCodeAuth_DarwinAppSupportFallback(t *testing.T) {
 	}
 }
 
+// TestDetectOpenCodeAuth_WindowsXDGDefault reproduces github issue #149
+// ("Nothing detected on Windows"). OpenCode resolves its data directory through
+// the `xdg-basedir` JS package, which has no Windows special-case and therefore
+// writes auth.json to %USERPROFILE%\.local\share\opencode\auth.json on Windows
+// (see anomalyco/opencode#8235), NOT to %APPDATA%. Before the fix, Windows only
+// probed %APPDATA%\opencode\auth.json, so the reporter's credential at
+// C:\Users\Roman\.local\share\opencode\auth.json was never adopted.
+func TestDetectOpenCodeAuth_WindowsXDGDefault(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows xdg-default path is windows-only")
+	}
+	tmp := t.TempDir()
+	authDir := filepath.Join(tmp, ".local", "share", "opencode")
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := `{"opencode": {"type": "api", "key": "sk-from-windows-xdg-1234"}}`
+	if err := os.WriteFile(filepath.Join(authDir, "auth.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+	// homeDir() resolves via os.UserHomeDir(), which reads %USERPROFILE% on
+	// Windows. Point it at the temp dir and clear the other roots so the only
+	// auth.json we can find is the XDG-default one.
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("APPDATA", filepath.Join(tmp, "AppData", "Roaming"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+
+	var result Result
+	detectOpenCodeAuth(&result)
+
+	var found *core.AccountConfig
+	for i := range result.Accounts {
+		if result.Accounts[i].ID == "opencode" {
+			found = &result.Accounts[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected opencode account from %%USERPROFILE%%\\.local\\share, got %+v", result.Accounts)
+	}
+	if found.Token != "sk-from-windows-xdg-1234" {
+		t.Errorf("Token = %q, want sk-from-windows-xdg-1234", found.Token)
+	}
+}
+
 func TestMaskKey(t *testing.T) {
 	if got := maskKey("sk-moonshot-1234567890abcdef"); got != "sk-m...cdef" {
 		t.Errorf("maskKey long = %q, want sk-m...cdef", got)

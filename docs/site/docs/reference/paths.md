@@ -40,6 +40,11 @@ These belong to the third-party tools OpenUsage hooks into.
 | `~/.codex/config.toml` | Codex | `notify` registration. | `CODEX_CONFIG_DIR` |
 | `~/.config/opencode/opencode.json` | OpenCode | Plugin registration. | — |
 | `~/.config/opencode/plugins/openusage-telemetry.ts` | OpenCode | Plugin source installed by `integrations install opencode`. | — |
+| `~/.local/share/opencode/auth.json` | OpenCode | API keys adopted by auto-detection (OpenCode's data dir). | `XDG_DATA_HOME` |
+
+:::note OpenCode `auth.json` on Windows
+OpenCode resolves its data directory through the `xdg-basedir` library, which has no Windows-specific branch, so on Windows it writes credentials to `%USERPROFILE%\.local\share\opencode\auth.json` rather than under `%APPDATA%`. Auto-detection probes that XDG-style location first on Windows, then `%LOCALAPPDATA%\opencode\auth.json` and `%APPDATA%\opencode\auth.json` as forward-compatible fallbacks.
+:::
 
 ## Per-OS expansion
 

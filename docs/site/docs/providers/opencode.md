@@ -26,6 +26,8 @@ Tracks the OpenCode tool's auth status and available models. Spend and per-sessi
 
 Set `OPENCODE_API_KEY` (preferred) or `ZEN_API_KEY` (alias). Both work; the first non-empty value wins.
 
+OpenUsage also adopts API keys written to OpenCode's `auth.json` automatically. That file lives at `~/.local/share/opencode/auth.json` on Linux and macOS, at `$XDG_DATA_HOME/opencode/auth.json` when `XDG_DATA_HOME` is set, and at `%USERPROFILE%\.local\share\opencode\auth.json` on Windows (OpenCode uses the XDG-style location on Windows too). See the [paths reference](../reference/paths.md#tool-integration-paths).
+
 ### Manual configuration
 
 ```json

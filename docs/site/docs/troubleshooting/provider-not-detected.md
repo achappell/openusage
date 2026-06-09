@@ -52,6 +52,17 @@ OpenUsage looks for these keys in this order: process environment → shell rc f
 
 8. **GUI launches still work** for shell-rc-stored keys: OpenUsage parses `~/.zshrc` and friends directly, so launching from Spotlight/Dock no longer requires re-exporting in launchd. macOS keychain entries (Claude Code) are also picked up regardless of how you launched.
 
+### Windows / PowerShell
+
+1. **Set the key as an environment variable, not a PowerShell variable.** This is the most common Windows trap. `$OPENROUTER_API_KEY = "sk-..."` creates a *PowerShell variable*, which `openusage` cannot see. You need an *environment variable*:
+   ```powershell
+   $env:OPENROUTER_API_KEY = "sk-..."   # current session only
+   setx OPENROUTER_API_KEY "sk-..."     # persists to new sessions (reopen the terminal)
+   ```
+   Quick check: `Get-ChildItem Env:OPENROUTER_API_KEY` lists it when it is a real environment variable. `Get-Variable OPENROUTER_API_KEY` succeeding means you only set a PowerShell variable, and so does `OPENUSAGE_DEBUG` if you set it the same way (in which case debug logging never actually turns on).
+
+2. **OpenCode's `auth.json` lives at the XDG-style path on Windows.** Because OpenCode resolves its data directory via `xdg-basedir` (which has no Windows branch), it writes to `%USERPROFILE%\.local\share\opencode\auth.json`, not under `%APPDATA%`. Auto-detection probes that location first. If your key is elsewhere, point `XDG_DATA_HOME` at its parent or set `OPENCODE_API_KEY` directly. See the [paths reference](../reference/paths.md#tool-integration-paths).
+
 ## Style B: local binary + config dir
 
 Affected: `claude_code`, `codex`, `cursor`, `copilot`, `gemini_cli`.
@@ -134,6 +145,13 @@ Quit and grep:
 
 ```bash
 grep -i 'detect\|skip\|provider' /tmp/openusage-detect.log
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:OPENUSAGE_DEBUG = "1"
+openusage detect          # prints the same [detect] reasons inline
 ```
 
 Each missed provider prints a reason (env var missing, binary not found, dir absent, etc).
