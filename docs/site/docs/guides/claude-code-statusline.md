@@ -63,7 +63,7 @@ Then **restart Claude Code** (or open a new session) so it re-reads `settings.js
 | Context % | `🧠 96k (48%)` | Tokens in the context window vs. the model's limit; turns yellow then red as it fills. |
 
 :::tip
-The **5h usage window** segment needs the [telemetry daemon](../daemon/overview.md) (`openusage telemetry daemon install`), which is what polls Claude Code's rate-limit quota. The other segments work purely from local logs with no daemon.
+The **5h usage window** segment needs the [telemetry daemon](../daemon/overview.md) (`openusage telemetry daemon install`), which is what polls Claude Code's rate-limit quota. The value is cached locally for ~30s (a single small file shared across sessions), so renders stay instant and the daemon isn't hit on every keystroke. The other segments work purely from local logs with no daemon.
 :::
 
 ## Customize

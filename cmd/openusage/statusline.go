@@ -333,30 +333,69 @@ func writeJSONObjectWithBackup(path string, cfg map[string]any) error {
 func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) error {
 	in := readStatuslineInput(stdin)
 
-	// The 5h usage-window % is rate-limit data the daemon already collects; read
-	// it from the daemon over the local socket (no network) only when the segment
-	// is shown, and omit it silently if the daemon isn't running.
+	// The 5h usage-window % is rate-limit data the daemon collects; resolve it
+	// only when the segment is shown (cache-first, so most renders are instant).
 	fiveHourPct, haveFiveHour := 0.0, false
 	if opts.segmentEnabled("window5h") {
-		fiveHourPct, haveFiveHour = fetchFiveHourPctFromDaemon()
+		fiveHourPct, haveFiveHour = fiveHourUsagePct()
 	}
 
-	events, err := claudeCodeConversationEvents(claude_code.ParseCostMode(opts.mode), opts.offline)
-	if err != nil {
-		// Without logs we can still echo the model and Claude Code's own cost.
-		fmt.Fprintln(stdout, renderStatusline(in, nil, fiveHourPct, haveFiveHour, time.Now(), opts))
-		return nil
+	// Parsing the conversation logs is the slow part, so skip it entirely when no
+	// log-derived segment is shown (e.g. a window5h-only statusline).
+	var events []report.Event
+	if statuslineNeedsLogs(opts) {
+		if evs, err := claudeCodeConversationEvents(claude_code.ParseCostMode(opts.mode), opts.offline); err == nil {
+			events = evs
+		}
 	}
 	fmt.Fprintln(stdout, renderStatusline(in, events, fiveHourPct, haveFiveHour, time.Now(), opts))
 	return nil
 }
 
-// fetchFiveHourPctFromDaemon reads the claude_code 5h usage-window utilization
-// from the running daemon. It is best-effort: any error (no daemon, timeout,
-// missing metric) returns ok=false so the segment is simply omitted. Never makes
-// a network call — SourceDaemon only talks to the local socket.
+// statuslineNeedsLogs reports whether any shown segment is derived from the
+// local conversation logs (everything except the daemon-sourced 5h window).
+func statuslineNeedsLogs(opts statuslineOptions) bool {
+	for _, key := range []string{"model", "session", "today", "block", "burn", "context"} {
+		if opts.segmentEnabled(key) {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	// How long a cached 5h value is served without touching the daemon. The 5h
+	// window moves slowly, so a short staleness keeps renders instant while
+	// staying fresh. The cache is a single shared file, so parallel sessions
+	// share one refresh rather than each hammering the daemon.
+	fiveHourRefreshInterval = 30 * time.Second
+	// Beyond this, a stale cache is no longer trusted (daemon presumed down).
+	fiveHourMaxAge = 15 * time.Minute
+)
+
+// fiveHourUsagePct resolves the 5h usage-window % cache-first: serve a fresh
+// cached value instantly; otherwise ask the daemon (caching the result); if the
+// daemon is slow/down, fall back to the last-good value within fiveHourMaxAge.
+// Never makes a network call and never blocks longer than the daemon timeout.
+func fiveHourUsagePct() (float64, bool) {
+	if pct, age, ok := readFiveHourCache(); ok && age < fiveHourRefreshInterval {
+		return pct, true
+	}
+	if pct, ok := fetchFiveHourPctFromDaemon(); ok {
+		writeFiveHourCache(pct)
+		return pct, true
+	}
+	if pct, age, ok := readFiveHourCache(); ok && age < fiveHourMaxAge {
+		return pct, true
+	}
+	return 0, false
+}
+
+// fetchFiveHourPctFromDaemon reads claude_code's usage_five_hour from the
+// running daemon over the local socket (SourceDaemon never makes a network
+// call). Best-effort: any error returns ok=false.
 func fetchFiveHourPctFromDaemon() (float64, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
 	snaps, _, err := export.Collect(ctx, export.SourceDaemon)
 	if err != nil {
@@ -371,6 +410,68 @@ func fetchFiveHourPctFromDaemon() (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+type fiveHourCacheEntry struct {
+	Pct float64   `json:"pct"`
+	TS  time.Time `json:"ts"`
+}
+
+func fiveHourCachePath() string {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".cache", "openusage", "statusline-5h.json")
+}
+
+// writeFiveHourCache overwrites the single cache file atomically (temp + rename)
+// so concurrent statusline renders from parallel sessions can never read or
+// leave a half-written file.
+func writeFiveHourCache(pct float64) {
+	p := fiveHourCachePath()
+	if p == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+	b, err := json.Marshal(fiveHourCacheEntry{Pct: pct, TS: time.Now()})
+	if err != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(p), ".statusline-5h-*.tmp")
+	if err != nil {
+		return
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return
+	}
+	if err := os.Rename(tmpName, p); err != nil {
+		_ = os.Remove(tmpName)
+	}
+}
+
+// readFiveHourCache returns the cached %, its age, and whether it was readable.
+func readFiveHourCache() (float64, time.Duration, bool) {
+	p := fiveHourCachePath()
+	if p == "" {
+		return 0, 0, false
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return 0, 0, false
+	}
+	var c fiveHourCacheEntry
+	if json.Unmarshal(b, &c) != nil || c.TS.IsZero() {
+		return 0, 0, false
+	}
+	return c.Pct, time.Since(c.TS), true
 }
 
 // readStatuslineInput reads and decodes the stdin payload. A terminal (no pipe)
