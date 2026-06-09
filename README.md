@@ -95,18 +95,18 @@ Show your Claude Code, Codex, Cursor, Copilot, and OpenRouter usage — cost, qu
 </tr>
 </table>
 
-Setup is a single command. It opens a one-screen, live-preview configurator where you pick the position, which tool(s) to show, the segment components, and emoji vs. real provider icons — and watch the result update as you go:
+One command to set it up. Tweak the layout and segments live, then reload:
 
 ```bash
-openusage tmux install                         # interactive: live-preview configurator
+openusage tmux install                         # interactive setup
 tmux source-file ~/.config/tmux/tmux.conf      # reload
 ```
 
 <p align="center">
-  <img src="./assets/install-tmux.gif" alt="Installing the OpenUsage tmux status segment with the live-preview configurator" width="720">
+  <img src="./assets/install-tmux.gif" alt="Installing the OpenUsage tmux status segment" width="720">
 </p>
 
-Want real provider logos instead of emoji? The configurator offers to install a bundled icon font and configure your terminal — see [provider icons](docs/site/docs/guides/tmux-integration.md#provider-icons-custom-font).
+Want real provider logos instead of emoji? The installer can drop in a bundled icon font and wire up your terminal. See [provider icons](docs/site/docs/guides/tmux-integration.md#provider-icons-custom-font).
 
 ```bash
 openusage tmux install --write                 # non-interactive (scripting): just write the snippet
@@ -119,19 +119,21 @@ See the [tmux integration guide](docs/site/docs/guides/tmux-integration.md) for 
 
 ### Claude Code statusline
 
-Show live session cost, today's spend, the active 5-hour block, burn rate, and context-window usage right in the **Claude Code status bar**:
+Your cost, burn rate, how much of the 5-hour limit you've used, and how full the context window is. Right in the **Claude Code status bar**:
 
 ![OpenUsage statusline in Claude Code](./assets/claudecodestatus.png)
 
+Same deal as tmux: one command, pick your segments, apply.
+
 ```bash
-openusage statusline install     # interactive: live-preview configurator
+openusage statusline install
 ```
 
-Like the tmux installer, this opens a one-screen configurator where you toggle which segments to show (model, session/today/block cost, burn rate, **5h usage window %**, context %) and watch a live preview, then writes it into `~/.claude/settings.json`. Restart Claude Code to see it.
-
 <p align="center">
-  <img src="./assets/statusline-install.gif" alt="Installing the Claude Code statusline with the live-preview configurator" width="720">
+  <img src="./assets/statusline-install.gif" alt="Installing the Claude Code statusline" width="720">
 </p>
+
+Restart Claude Code and it's there.
 
 See the [statusline guide](docs/site/docs/guides/claude-code-statusline.md) for customization and manual setup.
 
