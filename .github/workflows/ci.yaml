@@ -47,7 +47,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      CGO_ENABLED: "1" # mattn/go-sqlite3 (cursor provider + telemetry store)
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -58,6 +60,8 @@ jobs:
       - name: Install C compiler (CGO for sqlite3)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gcc
+
+      # macOS ships clang; the windows-latest image ships mingw-w64 gcc on PATH.
 
       - name: Run tests
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -75,12 +79,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
-            goos: linux
+            bin: openusage
           - os: macos-latest
-            goos: darwin
+            bin: openusage
+          - os: windows-latest
+            bin: openusage.exe
+    env:
+      CGO_ENABLED: "1" # mattn/go-sqlite3 (cursor provider + telemetry store)
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -92,11 +99,15 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gcc
 
+      # macOS ships clang; the windows-latest image ships mingw-w64 gcc on PATH.
+
       - name: Build binary
-        run: go build -ldflags="-s -w" -o openusage ./cmd/openusage
+        shell: bash
+        run: go build -ldflags="-s -w" -o ${{ matrix.bin }} ./cmd/openusage
 
       - name: Verify binary
-        run: ls -la openusage
+        shell: bash
+        run: ls -la ${{ matrix.bin }}
 
   fmt:
     name: gofmt

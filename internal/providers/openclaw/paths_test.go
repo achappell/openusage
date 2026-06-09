@@ -3,15 +3,27 @@ package openclaw
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+// setHome points the home-directory resolver at dir on every OS. On Windows
+// os.UserHomeDir() reads %USERPROFILE% (not $HOME), so both must be set or the
+// resolver lands on the real user profile instead of the temp fixture.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
+}
+
 func TestResolveAgentsDirs_OverrideWins(t *testing.T) {
 	override := t.TempDir()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := os.MkdirAll(filepath.Join(home, ".openclaw", "agents"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -27,7 +39,7 @@ func TestResolveAgentsDirs_OverrideWins(t *testing.T) {
 
 func TestResolveAgentsDirs_OverrideMissingFallsThroughToDefault(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	def := filepath.Join(home, ".openclaw", "agents")
 	if err := os.MkdirAll(def, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -44,7 +56,7 @@ func TestResolveAgentsDirs_OverrideMissingFallsThroughToDefault(t *testing.T) {
 
 func TestResolveAgentsDirs_OverrideMissingNoDefaults(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	acct := core.AccountConfig{}
 	acct.SetPath("agents_dir", filepath.Join(t.TempDir(), "does-not-exist"))
@@ -57,7 +69,7 @@ func TestResolveAgentsDirs_OverrideMissingNoDefaults(t *testing.T) {
 
 func TestResolveAgentsDirs_DefaultPlusLegacyUnion(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	def := filepath.Join(home, ".openclaw", "agents")
 	clawd := filepath.Join(home, ".clawdbot", "agents")
@@ -82,7 +94,7 @@ func TestResolveAgentsDirs_DefaultPlusLegacyUnion(t *testing.T) {
 
 func TestResolveAgentsDirs_DeDup(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := os.MkdirAll(filepath.Join(home, ".openclaw", "agents"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -96,7 +108,7 @@ func TestResolveAgentsDirs_DeDup(t *testing.T) {
 
 func TestResolveAgentsDirs_NoneExist(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	got := resolveAgentsDirs(core.AccountConfig{})
 	if len(got) != 0 {

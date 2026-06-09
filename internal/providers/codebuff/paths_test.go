@@ -3,10 +3,22 @@ package codebuff
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
+
+// setHome redirects the home directory for the test. defaultDataDirs()
+// resolves via os.UserHomeDir(), which reads %USERPROFILE% on Windows, not
+// $HOME, so we must set both for tests to be portable.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
+}
 
 func TestResolveDataDirs_OverrideWins(t *testing.T) {
 	dir := t.TempDir()
@@ -17,7 +29,7 @@ func TestResolveDataDirs_OverrideWins(t *testing.T) {
 	acct := core.AccountConfig{ID: "codebuff", Provider: "codebuff", Auth: "local"}
 	acct.SetPath("data_dir", override)
 
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	t.Setenv("CODEBUFF_DATA_DIR", "")
 
 	got := resolveDataDirs(acct)
@@ -31,7 +43,7 @@ func TestResolveDataDirs_OverrideWins(t *testing.T) {
 
 func TestResolveDataDirs_EnvOverrideAppended(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	// Create stable manicode root.
 	stable := filepath.Join(home, ".config", "manicode")
@@ -59,7 +71,7 @@ func TestResolveDataDirs_EnvOverrideAppended(t *testing.T) {
 
 func TestResolveDataDirs_MissingDirsSkipped(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("CODEBUFF_DATA_DIR", "")
 
 	got := resolveDataDirs(core.AccountConfig{ID: "codebuff"})
@@ -70,7 +82,7 @@ func TestResolveDataDirs_MissingDirsSkipped(t *testing.T) {
 
 func TestResolveDataDirs_AllChannelsDetected(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("CODEBUFF_DATA_DIR", "")
 
 	for _, name := range []string{"manicode", "manicode-dev", "manicode-staging"} {

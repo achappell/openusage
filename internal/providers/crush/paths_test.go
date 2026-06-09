@@ -170,8 +170,18 @@ func TestResolveProjectDB_DefaultsToDotCrush(t *testing.T) {
 }
 
 func TestResolveProjectDB_AbsoluteDataDir(t *testing.T) {
-	got := resolveProjectDB(crushProject{Path: "/abs/project", DataDir: "/elsewhere"})
-	want := filepath.Join("/elsewhere", "crush.db")
+	// resolveProjectDB switches on filepath.IsAbs(dataDir), which is
+	// platform-specific: "/elsewhere" is absolute on Unix but not on
+	// Windows. Use an OS-appropriate absolute data_dir so the absolute
+	// branch is actually exercised on every platform.
+	projectPath := "/abs/project"
+	absDataDir := "/elsewhere"
+	if runtime.GOOS == "windows" {
+		projectPath = `C:\abs\project`
+		absDataDir = `C:\elsewhere`
+	}
+	got := resolveProjectDB(crushProject{Path: projectPath, DataDir: absDataDir})
+	want := filepath.Join(absDataDir, "crush.db")
 	if got != want {
 		t.Errorf("absolute data_dir = %q, want %q", got, want)
 	}

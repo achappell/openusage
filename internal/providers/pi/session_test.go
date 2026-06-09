@@ -3,6 +3,7 @@ package pi
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -145,7 +146,14 @@ func TestWorkspaceLabel(t *testing.T) {
 		{"/home/jane/work/project-x", "project-x"},
 		{"/home/jane/work/project-x/", "project-x"},
 		{"project-x", "project-x"},
-		{`C:\Users\jane\proj`, `C:\Users\jane\proj`},
+	}
+	// workspaceLabel runs filepath.ToSlash, which only rewrites backslashes on
+	// Windows. So a Windows-style cwd yields the last segment on Windows but is
+	// opaque (no separator → whole string) on Unix.
+	if runtime.GOOS == "windows" {
+		cases = append(cases, struct{ in, want string }{`C:\Users\jane\proj`, "proj"})
+	} else {
+		cases = append(cases, struct{ in, want string }{`C:\Users\jane\proj`, `C:\Users\jane\proj`})
 	}
 	for _, tc := range cases {
 		got := workspaceLabel(tc.in)

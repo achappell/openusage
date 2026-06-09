@@ -6,12 +6,31 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
+
+// isolateConfigDir redirects config.ConfigDir() (which holds the credentials
+// store) into a fresh temp dir on every OS. The credentials path differs by
+// platform: Unix resolves it under $HOME/.config, while Windows reads %APPDATA%
+// (and %LOCALAPPDATA% via os.UserConfigDir fallbacks). Without redirecting the
+// Windows roots a test would read/write the developer's real credentials store,
+// so a stale or real Perplexity session leaks into the "no cookie" path.
+func isolateConfigDir(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", tmp)
+		t.Setenv("APPDATA", filepath.Join(tmp, "AppData", "Roaming"))
+		t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+	}
+}
 
 func configSaveSession(accountID, value string) error {
 	return config.SaveSession(accountID, config.BrowserSession{
@@ -66,9 +85,7 @@ func TestFetch_CookieConfigured_PopulatesAllFields(t *testing.T) {
 	server := startFakeConsole(t, orgID)
 	defer server.Close()
 
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	isolateConfigDir(t)
 
 	// Persist a session for this account using the real config helpers,
 	// then point the provider at our fake console via base URL override.
@@ -110,9 +127,7 @@ func TestFetch_CookieConfigured_PopulatesAllFields(t *testing.T) {
 
 // No cookie → AUTH state with helpful message pointing at the connect flow.
 func TestFetch_NoCookie_AuthMessage(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	isolateConfigDir(t)
 
 	snap, err := New().Fetch(context.Background(), core.AccountConfig{
 		ID:       "perplexity",
@@ -137,9 +152,7 @@ func TestFetch_CookieRejected_SurfacesAuth(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	isolateConfigDir(t)
 	pinSessionForTest(t, "perplexity", "expired-cookie")
 	t.Setenv("OPENUSAGE_PERPLEXITY_CONSOLE_BASE_URL", server.URL)
 

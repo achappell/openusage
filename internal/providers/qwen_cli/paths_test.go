@@ -3,10 +3,22 @@ package qwen_cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
+
+// setHome redirects the home directory for the test. defaultProjectsDir()
+// resolves via os.UserHomeDir(), which reads %USERPROFILE% on Windows, not
+// $HOME, so we must set both for tests to be portable.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
+}
 
 func TestResolveProjectsDir_OverrideWins(t *testing.T) {
 	dir := t.TempDir()
@@ -23,7 +35,7 @@ func TestResolveProjectsDir_OverrideMissingFallsThrough(t *testing.T) {
 	acct := core.AccountConfig{}
 	acct.SetPath(PathHintProjectsDirKey, missing)
 
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	if got := resolveProjectsDir(acct); got != "" {
 		t.Errorf("resolveProjectsDir = %q, want empty when override missing and no default", got)
 	}
@@ -31,7 +43,7 @@ func TestResolveProjectsDir_OverrideMissingFallsThrough(t *testing.T) {
 
 func TestResolveProjectsDir_DefaultUsedWhenPresent(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	def := filepath.Join(home, ".qwen", "projects")
 	if err := os.MkdirAll(def, 0o755); err != nil {
@@ -44,7 +56,7 @@ func TestResolveProjectsDir_DefaultUsedWhenPresent(t *testing.T) {
 }
 
 func TestResolveProjectsDir_EmptyWhenNothingExists(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	if got := resolveProjectsDir(core.AccountConfig{}); got != "" {
 		t.Errorf("resolveProjectsDir = %q, want empty", got)
 	}

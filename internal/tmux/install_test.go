@@ -4,9 +4,21 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// setHome points the home-directory resolver at dir on every OS. On Windows
+// os.UserHomeDir() reads %USERPROFILE% (not $HOME), so both must be set or the
+// resolver lands on the real user profile instead of the temp fixture.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
+}
 
 func TestInstallPrintModeEmitsSnippet(t *testing.T) {
 	var buf bytes.Buffer
@@ -24,7 +36,7 @@ func TestInstallPrintModeEmitsSnippet(t *testing.T) {
 
 func TestInstallWritesNewConf(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("XDG_CONFIG_HOME", "") // force ~/.config path
 
 	var out bytes.Buffer
@@ -114,7 +126,7 @@ func TestInstallAppendsToExistingConfWithoutSentinels(t *testing.T) {
 func TestDetectTmuxConfXDGPreference(t *testing.T) {
 	home := t.TempDir()
 	xdg := filepath.Join(home, "xdg")
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 
 	// No conf yet: XDG path wins.

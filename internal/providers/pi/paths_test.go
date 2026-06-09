@@ -3,14 +3,26 @@ package pi
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+// setHome points the home-directory resolver at dir on every OS. On Windows
+// os.UserHomeDir() reads %USERPROFILE% (not $HOME), so both must be set or the
+// resolver lands on the real user profile instead of the temp fixture.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
+}
+
 func TestResolveSessionsDirs_OverrideWins(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	override := t.TempDir()
 	acct := core.AccountConfig{ID: "pi", Provider: "pi"}
 	acct.SetPath("sessions_dir", override)
@@ -23,7 +35,7 @@ func TestResolveSessionsDirs_OverrideWins(t *testing.T) {
 
 func TestResolveSessionsDirs_OverrideMissingFallsThrough(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	acct := core.AccountConfig{ID: "pi", Provider: "pi"}
 	acct.SetPath("sessions_dir", filepath.Join(t.TempDir(), "does-not-exist"))
 
@@ -37,7 +49,7 @@ func TestResolveSessionsDirs_OverrideMissingFallsThrough(t *testing.T) {
 
 func TestResolveSessionsDirs_OnlySessionsDirSet(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	piOverride := t.TempDir()
 	// Also create the default OMP dir so we can verify it's still picked up
@@ -64,7 +76,7 @@ func TestResolveSessionsDirs_OnlySessionsDirSet(t *testing.T) {
 
 func TestResolveSessionsDirs_OnlyOmpSessionsDirSet(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	ompOverride := t.TempDir()
 	piDefault := filepath.Join(home, ".pi", "agent", "sessions")
@@ -89,7 +101,7 @@ func TestResolveSessionsDirs_OnlyOmpSessionsDirSet(t *testing.T) {
 
 func TestResolveSessionsDirs_BothOverridesSet(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	piOverride := t.TempDir()
 	ompOverride := t.TempDir()
@@ -112,7 +124,7 @@ func TestResolveSessionsDirs_BothOverridesSet(t *testing.T) {
 
 func TestResolveSessionsDirs_NeitherOverrideSet(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	piDefault := filepath.Join(home, ".pi", "agent", "sessions")
 	ompDefault := filepath.Join(home, ".omp", "agent", "sessions")

@@ -3,14 +3,26 @@ package kimi_cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+// setHome redirects the home directory for the test. defaultSessionsDir() and
+// defaultConfigPath() resolve via os.UserHomeDir(), which reads %USERPROFILE%
+// on Windows, not $HOME, so we must set both for tests to be portable.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
+}
+
 func TestResolveSessionsDir_DefaultAndOverride(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	// No directory exists yet → empty result.
 	acct := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli", Auth: "local"}
@@ -44,7 +56,7 @@ func TestResolveSessionsDir_DefaultAndOverride(t *testing.T) {
 
 func TestResolveConfigPath_DefaultAndOverride(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	acct := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli"}
 	if got := resolveConfigPath(acct); got != "" {

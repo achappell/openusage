@@ -70,12 +70,10 @@ run: ## Run the application locally
 
 .PHONY: build
 build: deps ## Build the binary
-	@mkdir -p $(BIN_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME)$(EXE) $(CMD_DIR)
 
 .PHONY: demo
 demo: deps ## Build and run the demo with dummy data (for screenshots)
-	@mkdir -p $(BIN_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME)-demo$(EXE) ./cmd/demo
 	$(BIN_DIR)/$(APP_NAME)-demo$(EXE)
 
