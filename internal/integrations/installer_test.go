@@ -91,13 +91,16 @@ func TestInstallCodex(t *testing.T) {
 		t.Fatalf("result.Action = %q, want %q", result.Action, "installed")
 	}
 
-	// Verify template.
-	templateData, err := os.ReadFile(result.TemplateFile)
-	if err != nil {
-		t.Fatalf("read template file: %v", err)
-	}
-	if !strings.Contains(string(templateData), "openusage-integration-version: "+IntegrationVersion) {
-		t.Fatal("template missing version marker")
+	writesArtifact := def.WritesArtifact == nil || def.WritesArtifact(dirs)
+	if writesArtifact {
+		// Verify template (Unix: a codex-notify.sh script is written).
+		templateData, err := os.ReadFile(result.TemplateFile)
+		if err != nil {
+			t.Fatalf("read template file: %v", err)
+		}
+		if !strings.Contains(string(templateData), "openusage-integration-version: "+IntegrationVersion) {
+			t.Fatal("template missing version marker")
+		}
 	}
 
 	// Verify config has notify line.
@@ -109,8 +112,16 @@ func TestInstallCodex(t *testing.T) {
 	if !strings.Contains(configStr, "notify") {
 		t.Fatal("config missing notify line")
 	}
-	if !strings.Contains(configStr, "codex-notify.sh") {
-		t.Fatal("config missing hook file reference")
+	if writesArtifact {
+		if !strings.Contains(configStr, "codex-notify.sh") {
+			t.Fatal("config missing hook file reference")
+		}
+	} else {
+		// Windows: the openusage binary is registered directly with the
+		// telemetry hook subcommand instead of a script file.
+		if !strings.Contains(configStr, "telemetry") || !strings.Contains(configStr, "hook") || !strings.Contains(configStr, "codex") {
+			t.Fatalf("config missing binary notify registration: %s", configStr)
+		}
 	}
 }
 
@@ -221,8 +232,10 @@ func TestUninstallCodex(t *testing.T) {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
 
-	if _, err := os.Stat(result.TemplateFile); !os.IsNotExist(err) {
-		t.Fatal("template file still exists after uninstall")
+	if def.WritesArtifact == nil || def.WritesArtifact(dirs) {
+		if _, err := os.Stat(result.TemplateFile); !os.IsNotExist(err) {
+			t.Fatal("template file still exists after uninstall")
+		}
 	}
 
 	configData, err := os.ReadFile(result.ConfigFile)
@@ -288,9 +301,18 @@ func TestInstallIdempotent(t *testing.T) {
 				t.Fatalf("second Install() error = %v", err)
 			}
 
-			// Second install sees existing version, so action is "upgraded".
-			if result2.Action != "upgraded" {
-				t.Fatalf("second result.Action = %q, want %q", result2.Action, "upgraded")
+			// Second install sees the existing version embedded in the artifact
+			// file, so the action is "upgraded". Integrations that write no
+			// artifact file (e.g. Codex on Windows registers the binary
+			// directly) have no on-disk version to detect, so they report
+			// "installed" each time.
+			writesArtifact := def.WritesArtifact == nil || def.WritesArtifact(dirs)
+			wantAction := "upgraded"
+			if !writesArtifact {
+				wantAction = "installed"
+			}
+			if result2.Action != wantAction {
+				t.Fatalf("second result.Action = %q, want %q", result2.Action, wantAction)
 			}
 
 			// Config should not have duplicate entries.
@@ -383,46 +405,54 @@ func TestLifecycle_InstallDetectUpgradeUninstall(t *testing.T) {
 				t.Fatal("after install: NeedsUpgrade should be false")
 			}
 
-			// Phase 4: Simulate old version → detect as outdated.
 			targetFile := def.TargetFileFunc(dirs)
-			oldContent, err := os.ReadFile(targetFile)
-			if err != nil {
-				t.Fatalf("read target: %v", err)
-			}
-			// Replace version marker with an old one.
-			oldStr := strings.ReplaceAll(string(oldContent),
-				"openusage-integration-version: "+IntegrationVersion,
-				"openusage-integration-version: 2020-01-01.0")
-			if err := os.WriteFile(targetFile, []byte(oldStr), def.TemplateFileMode); err != nil {
-				t.Fatalf("write old version: %v", err)
-			}
-			st = def.Detector(dirs)
-			if st.State != "outdated" {
-				t.Fatalf("after downgrade: state = %q, want %q", st.State, "outdated")
-			}
-			if !st.NeedsUpgrade {
-				t.Fatal("after downgrade: NeedsUpgrade should be true")
-			}
+			writesArtifact := def.WritesArtifact == nil || def.WritesArtifact(dirs)
 
-			// Phase 5: Upgrade.
-			upgradeResult, err := Upgrade(def, dirs)
-			if err != nil {
-				t.Fatalf("Upgrade() error = %v", err)
-			}
-			if upgradeResult.Action != "upgraded" {
-				t.Fatalf("Upgrade action = %q, want %q", upgradeResult.Action, "upgraded")
-			}
-			if upgradeResult.PreviousVer != "2020-01-01.0" {
-				t.Fatalf("Upgrade PreviousVer = %q, want %q", upgradeResult.PreviousVer, "2020-01-01.0")
-			}
+			// Phases 4-6 simulate an on-disk version downgrade then upgrade.
+			// These only apply to integrations that write an artifact file;
+			// integrations that register the openusage binary directly (e.g.
+			// Codex on Windows) have no on-disk version to downgrade.
+			if writesArtifact {
+				// Phase 4: Simulate old version → detect as outdated.
+				oldContent, err := os.ReadFile(targetFile)
+				if err != nil {
+					t.Fatalf("read target: %v", err)
+				}
+				// Replace version marker with an old one.
+				oldStr := strings.ReplaceAll(string(oldContent),
+					"openusage-integration-version: "+IntegrationVersion,
+					"openusage-integration-version: 2020-01-01.0")
+				if err := os.WriteFile(targetFile, []byte(oldStr), def.TemplateFileMode); err != nil {
+					t.Fatalf("write old version: %v", err)
+				}
+				st = def.Detector(dirs)
+				if st.State != "outdated" {
+					t.Fatalf("after downgrade: state = %q, want %q", st.State, "outdated")
+				}
+				if !st.NeedsUpgrade {
+					t.Fatal("after downgrade: NeedsUpgrade should be true")
+				}
 
-			// Phase 6: After upgrade, status should be "ready" again.
-			st = def.Detector(dirs)
-			if st.State != "ready" {
-				t.Fatalf("after upgrade: state = %q, want %q", st.State, "ready")
-			}
-			if st.NeedsUpgrade {
-				t.Fatal("after upgrade: NeedsUpgrade should be false")
+				// Phase 5: Upgrade.
+				upgradeResult, err := Upgrade(def, dirs)
+				if err != nil {
+					t.Fatalf("Upgrade() error = %v", err)
+				}
+				if upgradeResult.Action != "upgraded" {
+					t.Fatalf("Upgrade action = %q, want %q", upgradeResult.Action, "upgraded")
+				}
+				if upgradeResult.PreviousVer != "2020-01-01.0" {
+					t.Fatalf("Upgrade PreviousVer = %q, want %q", upgradeResult.PreviousVer, "2020-01-01.0")
+				}
+
+				// Phase 6: After upgrade, status should be "ready" again.
+				st = def.Detector(dirs)
+				if st.State != "ready" {
+					t.Fatalf("after upgrade: state = %q, want %q", st.State, "ready")
+				}
+				if st.NeedsUpgrade {
+					t.Fatal("after upgrade: NeedsUpgrade should be false")
+				}
 			}
 
 			// Phase 7: Uninstall.
@@ -435,9 +465,12 @@ func TestLifecycle_InstallDetectUpgradeUninstall(t *testing.T) {
 			if st.Installed {
 				t.Fatal("after uninstall: Installed should be false")
 			}
-			// Config file still exists (just patched), but template is gone.
-			if _, err := os.Stat(targetFile); !os.IsNotExist(err) {
-				t.Fatal("after uninstall: template file should not exist")
+			// Config file still exists (just patched), but the artifact file
+			// (when one is written) is gone.
+			if writesArtifact {
+				if _, err := os.Stat(targetFile); !os.IsNotExist(err) {
+					t.Fatal("after uninstall: template file should not exist")
+				}
 			}
 		})
 	}
@@ -456,14 +489,17 @@ func TestUpgrade(t *testing.T) {
 			}
 
 			targetFile := def.TargetFileFunc(dirs)
+			writesArtifact := def.WritesArtifact == nil || def.WritesArtifact(dirs)
 
-			// Seed an old version template file.
-			if err := os.MkdirAll(filepath.Dir(targetFile), 0o755); err != nil {
-				t.Fatalf("mkdir: %v", err)
-			}
-			oldContent := "# openusage-integration-version: 2025-01-01.0\nold content\n"
-			if err := os.WriteFile(targetFile, []byte(oldContent), def.TemplateFileMode); err != nil {
-				t.Fatalf("write old template: %v", err)
+			if writesArtifact {
+				// Seed an old version template file.
+				if err := os.MkdirAll(filepath.Dir(targetFile), 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				oldContent := "# openusage-integration-version: 2025-01-01.0\nold content\n"
+				if err := os.WriteFile(targetFile, []byte(oldContent), def.TemplateFileMode); err != nil {
+					t.Fatalf("write old template: %v", err)
+				}
 			}
 
 			result, err := Upgrade(def, dirs)
@@ -473,21 +509,24 @@ func TestUpgrade(t *testing.T) {
 			if result.Action != "upgraded" {
 				t.Fatalf("result.Action = %q, want %q", result.Action, "upgraded")
 			}
-			if result.PreviousVer != "2025-01-01.0" {
-				t.Fatalf("result.PreviousVer = %q, want %q", result.PreviousVer, "2025-01-01.0")
-			}
 			if result.InstalledVer != IntegrationVersion {
 				t.Fatalf("result.InstalledVer = %q, want %q", result.InstalledVer, IntegrationVersion)
 			}
 
-			// Verify new version is in the template.
-			templateData, err := os.ReadFile(targetFile)
-			if err != nil {
-				t.Fatalf("read template: %v", err)
-			}
-			ver := parseIntegrationVersion(templateData)
-			if ver != IntegrationVersion {
-				t.Fatalf("template version = %q, want %q", ver, IntegrationVersion)
+			if writesArtifact {
+				if result.PreviousVer != "2025-01-01.0" {
+					t.Fatalf("result.PreviousVer = %q, want %q", result.PreviousVer, "2025-01-01.0")
+				}
+
+				// Verify new version is in the template.
+				templateData, err := os.ReadFile(targetFile)
+				if err != nil {
+					t.Fatalf("read template: %v", err)
+				}
+				ver := parseIntegrationVersion(templateData)
+				if ver != IntegrationVersion {
+					t.Fatalf("template version = %q, want %q", ver, IntegrationVersion)
+				}
 			}
 		})
 	}

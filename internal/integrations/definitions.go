@@ -40,15 +40,16 @@ func DefinitionByID(id ID) (Definition, bool) {
 }
 
 func claudeCodeDef() Definition {
+	art := claudeArtifact()
 	return Definition{
 		ID:          ClaudeCodeID,
 		Name:        "Claude Code Hooks",
 		Description: "Telemetry hooks for Claude Code (Stop, SubagentStop, PostToolUse)",
 		Type:        TypeHookScript,
-		Template:    claudeTemplate,
+		Template:    art.Template,
 
 		TargetFileFunc: func(dirs Dirs) string {
-			return filepath.Join(dirs.HooksDir, "claude-hook.sh")
+			return filepath.Join(dirs.HooksDir, art.Basename)
 		},
 		ConfigFileFunc: func(dirs Dirs) string {
 			if f := strings.TrimSpace(os.Getenv("CLAUDE_SETTINGS_FILE")); f != "" {
@@ -62,21 +63,27 @@ func claudeCodeDef() Definition {
 
 		MatchProviderIDs:  []string{"claude_code"},
 		MatchToolNameHint: "Claude Code",
-		TemplateFileMode:  0o755,
-		EscapeBin:         escapeForShellString,
+		TemplateFileMode:  art.FileMode,
+		EscapeBin:         art.EscapeBin,
 	}
 }
 
 func codexDef() Definition {
+	art := codexArtifact()
 	return Definition{
 		ID:          CodexID,
 		Name:        "Codex Notify Hook",
 		Description: "Telemetry notify hook for OpenAI Codex CLI",
 		Type:        TypeHookScript,
-		Template:    codexTemplate,
+		Template:    art.Template,
 
 		TargetFileFunc: func(dirs Dirs) string {
-			return filepath.Join(dirs.HooksDir, "codex-notify.sh")
+			path, _ := codexTargetFile(dirs)
+			return path
+		},
+		WritesArtifact: func(dirs Dirs) bool {
+			_, writes := codexTargetFile(dirs)
+			return writes
 		},
 		ConfigFileFunc: func(dirs Dirs) string {
 			codexDir := strings.TrimSpace(os.Getenv("CODEX_CONFIG_DIR"))
@@ -91,8 +98,8 @@ func codexDef() Definition {
 
 		MatchProviderIDs:  []string{"codex"},
 		MatchToolNameHint: "Codex",
-		TemplateFileMode:  0o755,
-		EscapeBin:         escapeForShellString,
+		TemplateFileMode:  art.FileMode,
+		EscapeBin:         art.EscapeBin,
 	}
 }
 
@@ -188,7 +195,11 @@ func patchClaudeCodeConfig(configData []byte, targetFile string, install bool) (
 }
 
 func patchCodexConfig(configData []byte, targetFile string, install bool) ([]byte, error) {
-	notifyLine := fmt.Sprintf("notify = [\"%s\"]", targetFile)
+	// targetFile is the script path on Unix or the openusage binary path on
+	// Windows; codexNotifyTOML renders the platform-correct notify assignment
+	// (basic string array on Unix, literal string array invoking the binary on
+	// Windows so backslashes survive).
+	notifyLine := codexNotifyTOML(targetFile)
 
 	if install {
 		out := notifyLine + "\n"
@@ -291,12 +302,13 @@ func detectClaudeCodeStatus(dirs Dirs) Status {
 
 	configured := false
 	configFile := def.ConfigFileFunc(dirs)
+	needle := filepath.Base(def.TargetFileFunc(dirs)) // claude-hook.sh / claude-hook.cmd
 	if settingsData, err := os.ReadFile(configFile); err == nil {
 		var cfg map[string]any
 		if json.Unmarshal(settingsData, &cfg) == nil {
-			configured = hasCommandHook(cfg, "Stop", "claude-hook.sh") &&
-				hasCommandHook(cfg, "SubagentStop", "claude-hook.sh") &&
-				hasCommandHook(cfg, "PostToolUse", "claude-hook.sh")
+			configured = hasCommandHook(cfg, "Stop", needle) &&
+				hasCommandHook(cfg, "SubagentStop", needle) &&
+				hasCommandHook(cfg, "PostToolUse", needle)
 		}
 	}
 	st.Configured = configured
@@ -312,20 +324,35 @@ func detectCodexStatus(dirs Dirs) Status {
 		DesiredVersion: IntegrationVersion,
 	}
 
-	hookFile := def.TargetFileFunc(dirs)
-	hookData, hookErr := os.ReadFile(hookFile)
-	st.Installed = hookErr == nil
-	st.InstalledVersion = parseIntegrationVersion(hookData)
+	// On platforms where Codex registers the openusage binary directly (no
+	// script artifact), "installed" tracks the config registration rather than
+	// a file on disk; deriveState then keys off Configured.
+	if def.WritesArtifact == nil || def.WritesArtifact(dirs) {
+		hookFile := def.TargetFileFunc(dirs)
+		hookData, hookErr := os.ReadFile(hookFile)
+		st.Installed = hookErr == nil
+		st.InstalledVersion = parseIntegrationVersion(hookData)
+	}
 
 	configured := false
 	configFile := def.ConfigFileFunc(dirs)
 	if cfgData, err := os.ReadFile(configFile); err == nil {
-		content := string(cfgData)
-		if strings.Contains(content, "notify") && strings.Contains(content, "codex-notify.sh") {
+		if codexConfigured(string(cfgData)) {
 			configured = true
 		}
 	}
 	st.Configured = configured
+
+	// When there is no artifact file, treat configuration as installation so
+	// the derived state reflects "ready" once the notify hook is registered,
+	// and the desired version comes from the running binary.
+	if def.WritesArtifact != nil && !def.WritesArtifact(dirs) {
+		st.Installed = configured
+		if configured {
+			st.InstalledVersion = IntegrationVersion
+		}
+	}
+
 	deriveState(&st)
 	return st
 }

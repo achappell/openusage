@@ -39,8 +39,19 @@ type Definition struct {
 	Type        IntegrationType
 	Template    string // embedded template content
 
-	// TargetFileFunc returns the absolute path where the rendered template is written.
+	// TargetFileFunc returns the absolute path where the rendered template is
+	// written. When WritesArtifact reports false, this path is NOT written to;
+	// it is still passed to the ConfigPatcher as the registration target (e.g.
+	// the openusage binary path on platforms that register it directly).
 	TargetFileFunc func(dirs Dirs) string
+
+	// WritesArtifact reports whether Install should render and write the
+	// template to TargetFileFunc. A nil value means true (the default: an
+	// artifact file is always written). When it returns false, Install skips
+	// writing/backing-up the target file and Uninstall skips removing it; only
+	// the tool config is patched. This supports platforms where an integration
+	// registers the openusage binary directly instead of a hook script.
+	WritesArtifact func(dirs Dirs) bool
 
 	// ConfigFileFunc returns the absolute path to the target tool's config file.
 	// Implementations must check tool-specific env var overrides internally
@@ -64,6 +75,25 @@ type Definition struct {
 	// TemplateFileMode is the file permission for the rendered template file.
 	TemplateFileMode os.FileMode
 
+	// EscapeBin transforms the openusage binary path for template substitution.
+	EscapeBin func(string) string
+}
+
+// artifactSpec bundles the platform-specific pieces of a rendered integration
+// artifact (hook script / batch file). It lets a definition pick its template,
+// target basename, file mode, and binary-path escaper per OS via build-tagged
+// helpers (see claude_artifact_*.go, codex_artifact_*.go) instead of inline
+// runtime.GOOS branching.
+type artifactSpec struct {
+	// Template is the embedded template content. An empty Template means the
+	// integration writes no artifact file on this platform (the installer
+	// skips writing in that case).
+	Template string
+	// Basename is the file name written into the hooks dir. Empty when there
+	// is no artifact file.
+	Basename string
+	// FileMode is the permission applied to the rendered artifact file.
+	FileMode os.FileMode
 	// EscapeBin transforms the openusage binary path for template substitution.
 	EscapeBin func(string) string
 }

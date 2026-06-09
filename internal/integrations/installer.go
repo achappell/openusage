@@ -23,15 +23,23 @@ func Install(def Definition, dirs Dirs) (InstallResult, error) {
 	targetFile := def.TargetFileFunc(dirs)
 	configFile := def.ConfigFileFunc(dirs)
 
+	// writesArtifact defaults to true; only integrations that register the
+	// openusage binary directly (no hook script on this platform) opt out.
+	writesArtifact := def.WritesArtifact == nil || def.WritesArtifact(dirs)
+
 	// Determine previous version (if any) for the result action.
 	previousVer := ""
-	if data, err := os.ReadFile(targetFile); err == nil {
-		previousVer = parseIntegrationVersion(data)
+	if writesArtifact {
+		if data, err := os.ReadFile(targetFile); err == nil {
+			previousVer = parseIntegrationVersion(data)
+		}
 	}
 
 	// Create parent directories.
-	if err := os.MkdirAll(filepath.Dir(targetFile), 0o755); err != nil {
-		return InstallResult{}, fmt.Errorf("integrations: create target dir: %w", err)
+	if writesArtifact {
+		if err := os.MkdirAll(filepath.Dir(targetFile), 0o755); err != nil {
+			return InstallResult{}, fmt.Errorf("integrations: create target dir: %w", err)
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(configFile), 0o755); err != nil {
 		return InstallResult{}, fmt.Errorf("integrations: create config dir: %w", err)
@@ -42,16 +50,20 @@ func Install(def Definition, dirs Dirs) (InstallResult, error) {
 	content = strings.ReplaceAll(content, "__OPENUSAGE_BIN_DEFAULT__", def.EscapeBin(dirs.OpenusageBin))
 
 	// Backup existing files before overwriting.
-	if err := backupIfExists(targetFile); err != nil {
-		return InstallResult{}, fmt.Errorf("integrations: backup target: %w", err)
+	if writesArtifact {
+		if err := backupIfExists(targetFile); err != nil {
+			return InstallResult{}, fmt.Errorf("integrations: backup target: %w", err)
+		}
 	}
 	if err := backupIfExists(configFile); err != nil {
 		return InstallResult{}, fmt.Errorf("integrations: backup config: %w", err)
 	}
 
 	// Write rendered template.
-	if err := os.WriteFile(targetFile, []byte(content), def.TemplateFileMode); err != nil {
-		return InstallResult{}, fmt.Errorf("integrations: write template: %w", err)
+	if writesArtifact {
+		if err := os.WriteFile(targetFile, []byte(content), def.TemplateFileMode); err != nil {
+			return InstallResult{}, fmt.Errorf("integrations: write template: %w", err)
+		}
 	}
 
 	// Read config, patch it, write it back.
@@ -103,9 +115,12 @@ func Uninstall(def Definition, dirs Dirs) error {
 		}
 	}
 
-	// Remove the template file.
-	if err := os.Remove(targetFile); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("integrations: remove template: %w", err)
+	// Remove the template file (unless this integration writes no artifact on
+	// this platform, e.g. it registers the openusage binary directly).
+	if def.WritesArtifact == nil || def.WritesArtifact(dirs) {
+		if err := os.Remove(targetFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("integrations: remove template: %w", err)
+		}
 	}
 
 	return nil

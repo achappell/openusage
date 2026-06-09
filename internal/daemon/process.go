@@ -293,6 +293,13 @@ func StartupDiagnostics(manager ServiceManager, socketPath string) string {
 			}
 		}
 	}
+	if manager.Kind == "windows" {
+		if out, err := RunCommand("schtasks", "/Query", "/TN", WindowsScheduledTask, "/V", "/FO", "LIST"); err == nil {
+			if tail := TailTextLines(out, 40); strings.TrimSpace(tail) != "" {
+				lines = append(lines, "schtasks_query_tail:\n"+tail)
+			}
+		}
+	}
 	return strings.Join(lines, "\n")
 }
 

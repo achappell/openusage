@@ -7,6 +7,14 @@ BUILD_DATE  := $(shell date +%Y-%m-%dT%H:%M:%S%z)
 BIN_DIR     := bin
 CMD_DIR     := ./cmd/openusage
 
+# Append .exe to built binaries on Windows so they are runnable. GNU Make sets
+# OS=Windows_NT on Windows (incl. Git Bash, where these recipes are run).
+ifeq ($(OS),Windows_NT)
+EXE         := .exe
+else
+EXE         :=
+endif
+
 GO          := go
 GOFLAGS     :=
 LDFLAGS     := -s -w \
@@ -63,13 +71,13 @@ run: ## Run the application locally
 .PHONY: build
 build: deps ## Build the binary
 	@mkdir -p $(BIN_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME) $(CMD_DIR)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME)$(EXE) $(CMD_DIR)
 
 .PHONY: demo
 demo: deps ## Build and run the demo with dummy data (for screenshots)
 	@mkdir -p $(BIN_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME)-demo ./cmd/demo
-	$(BIN_DIR)/$(APP_NAME)-demo
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME)-demo$(EXE) ./cmd/demo
+	$(BIN_DIR)/$(APP_NAME)-demo$(EXE)
 
 .PHONY: sync-tools
 sync-tools: ## Regenerate all AI tool config files from canonical template

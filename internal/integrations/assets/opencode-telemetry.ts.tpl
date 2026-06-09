@@ -290,10 +290,25 @@ function safeJSONStringify(value: unknown): string | undefined {
   }
 }
 
+// On Windows the openusage daemon resolves its state dir to
+// %APPDATA%\openusage\state (see telemetry.DefaultStateDir). XDG_STATE_HOME
+// still wins when explicitly set, matching the Go side.
+function windowsStateDir(): string {
+  const stateHome = (process.env.XDG_STATE_HOME || "").trim()
+  if (stateHome !== "") {
+    return `${stateHome}\\openusage`
+  }
+  const appData = (process.env.APPDATA || "").trim()
+  return `${appData}\\openusage\\state`
+}
+
 function resolveSocketPath(): string {
   const explicit = (process.env.OPENUSAGE_SOCKET || "").trim()
   if (explicit !== "") {
     return explicit
+  }
+  if (process.platform === "win32") {
+    return `${windowsStateDir()}\\telemetry.sock`
   }
   const stateHome = (process.env.XDG_STATE_HOME || "").trim()
   const base = stateHome !== "" ? stateHome : `${process.env.HOME}/.local/state`
@@ -304,6 +319,9 @@ function resolveHookSpoolDir(): string {
   const explicit = (process.env.OPENUSAGE_HOOK_SPOOL || "").trim()
   if (explicit !== "") {
     return explicit
+  }
+  if (process.platform === "win32") {
+    return `${windowsStateDir()}\\hook-spool`
   }
   const stateHome = (process.env.XDG_STATE_HOME || "").trim()
   const base = stateHome !== "" ? stateHome : `${process.env.HOME}/.local/state`

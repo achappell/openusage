@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -14,7 +15,9 @@ import (
 
 func shortSocketPath(t *testing.T, suffix string) string {
 	t.Helper()
-	return fmt.Sprintf("/tmp/openusage-%d-%s.sock", time.Now().UnixNano(), strings.TrimSpace(suffix))
+	// Use the OS temp dir (short enough to stay under the AF_UNIX sun_path
+	// limit) rather than a hardcoded /tmp, which does not exist on Windows.
+	return filepath.Join(os.TempDir(), fmt.Sprintf("openusage-%d-%s.sock", time.Now().UnixNano(), strings.TrimSpace(suffix)))
 }
 
 func TestEnsureSocketPathAvailable_ActiveSocketReturnsError(t *testing.T) {
@@ -70,6 +73,15 @@ func TestEnsureSocketPathAvailable_RemovesStaleSocket(t *testing.T) {
 }
 
 func TestEnsureSocketPathAvailable_RejectsRegularFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// On Windows an AF_UNIX socket path is materialized as a regular file
+		// and never reports os.ModeSocket, so we deliberately cannot distinguish
+		// a leftover socket from any other file: EnsureSocketPathAvailable treats
+		// it as a possibly-stale socket and removes it after a failed dial probe
+		// (see socket_windows.go). The "reject regular file" semantic is
+		// macOS/Linux-only.
+		t.Skip("regular-file rejection is not applicable to Windows AF_UNIX sockets")
+	}
 	socketPath := shortSocketPath(t, "file")
 	_ = os.Remove(socketPath)
 	t.Cleanup(func() { _ = os.Remove(socketPath) })

@@ -143,12 +143,15 @@ func TestMatchDetected_InstalledIntegrationNotActionable(t *testing.T) {
 	}
 
 	// Create the claude hook file with correct version to make it "installed".
-	hookDir := filepath.Join(dirs.HooksDir)
+	// Use the per-OS artifact path/basename the detector actually looks for
+	// (claude-hook.sh on Unix, claude-hook.cmd on Windows).
+	claudeDef, _ := DefinitionByID(ClaudeCodeID)
+	hookFile := claudeDef.TargetFileFunc(dirs)
+	hookDir := filepath.Dir(hookFile)
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	hookContent := "#!/bin/bash\n# OPENUSAGE_INTEGRATION_VERSION=" + IntegrationVersion + "\n"
-	hookFile := filepath.Join(hookDir, "claude-hook.sh")
 	if err := os.WriteFile(hookFile, []byte(hookContent), 0o755); err != nil {
 		t.Fatal(err)
 	}

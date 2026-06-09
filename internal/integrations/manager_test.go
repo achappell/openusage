@@ -90,6 +90,11 @@ func TestManagerDetectOutdated(t *testing.T) {
 
 	// Create an old-version hook file for codex.
 	def, _ := DefinitionByID(CodexID)
+	if def.WritesArtifact != nil && !def.WritesArtifact(dirs) {
+		// On platforms where Codex registers the openusage binary directly
+		// (no hook script), there is no on-disk version to mark "outdated".
+		t.Skip("codex writes no artifact file on this platform; outdated detection is file-based")
+	}
 	hookFile := def.TargetFileFunc(dirs)
 	configFile := def.ConfigFileFunc(dirs)
 	if err := os.MkdirAll(filepath.Dir(hookFile), 0o755); err != nil {

@@ -42,14 +42,22 @@ func newTelemetryHookCommand() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "hook <source>",
-		Short: "Send a hook payload to the telemetry daemon via stdin",
+		Use:   "hook <source> [payload]",
+		Short: "Send a hook payload to the telemetry daemon via stdin or an argument",
+		Long: strings.Join([]string{
+			"Send a hook payload to the telemetry daemon.",
+			"",
+			"The payload is read from stdin by default. If a non-empty positional",
+			"payload argument is provided after <source>, it is used instead of stdin.",
+			"This supports tools (e.g. Codex's notify) that pass the event JSON as argv.",
+		}, "\n"),
 		Example: strings.Join([]string{
 			"  openusage telemetry hook opencode < /tmp/opencode-hook-event.json",
 			"  openusage telemetry hook codex < /tmp/codex-notify-payload.json",
 			"  openusage telemetry hook claude_code < /tmp/claude-hook-payload.json",
+			"  openusage telemetry hook codex '{\"type\":\"agent-turn-complete\"}'",
 		}, "\n"),
-		Args: cobra.ExactArgs(1),
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			sourceName := strings.TrimSpace(args[0])
 			if _, ok := providers.TelemetrySourceBySystem(sourceName); !ok {
@@ -62,12 +70,21 @@ func newTelemetryHookCommand() *cobra.Command {
 				return fmt.Errorf("unknown telemetry source %q; known sources: %s", sourceName, strings.Join(known, ", "))
 			}
 
-			payload, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return fmt.Errorf("read hook payload from stdin: %w", err)
+			// Prefer a positional payload arg when provided and non-empty
+			// (e.g. Codex's notify passes the event JSON as argv). Otherwise
+			// read the payload from stdin exactly as before.
+			var payload []byte
+			if len(args) > 1 && strings.TrimSpace(args[1]) != "" {
+				payload = []byte(args[1])
+			} else {
+				stdinPayload, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					return fmt.Errorf("read hook payload from stdin: %w", err)
+				}
+				payload = stdinPayload
 			}
 			if len(strings.TrimSpace(string(payload))) == 0 {
-				return fmt.Errorf("stdin payload is empty")
+				return fmt.Errorf("hook payload is empty")
 			}
 
 			client := daemon.NewClient(strings.TrimSpace(socketPath))

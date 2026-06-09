@@ -65,6 +65,12 @@ func RunServer(cfg Config) error {
 		log.SetOutput(io.Discard)
 	}
 
+	// Pull in API keys / settings captured at `daemon install` time. No-op when
+	// the var is already set in the environment (e.g. injected by systemd/launchd
+	// or exported in the shell); the primary beneficiary is the Windows scheduled
+	// task, which can't inject an env file itself.
+	LoadServiceEnv()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -358,7 +364,7 @@ func EnsureSocketPathAvailable(socketPath string) error {
 		return fmt.Errorf("stat socket path %s: %w", socketPath, err)
 	}
 
-	if info.Mode()&os.ModeSocket == 0 {
+	if !socketFileLooksLikeSocket(info) {
 		return fmt.Errorf("socket path %s already exists and is not a socket", socketPath)
 	}
 

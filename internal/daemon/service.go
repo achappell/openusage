@@ -18,6 +18,10 @@ import (
 const (
 	LaunchdDaemonLabel = "com.openusage.telemetryd"
 	SystemdDaemonUnit  = "openusage-telemetry.service"
+	// WindowsScheduledTask is the Task Scheduler task name used on Windows. A
+	// logon-triggered scheduled task running in the user session is the analogue
+	// of the launchd LaunchAgent / systemd --user unit on macOS / Linux.
+	WindowsScheduledTask = "OpenUsage Telemetry Daemon"
 )
 
 type ServiceManager struct {
@@ -55,8 +59,49 @@ func (m ServiceManager) StatusHint() string {
 		return "launchctl print gui/$(id -u)/" + LaunchdDaemonLabel
 	case "linux":
 		return "systemctl --user status " + SystemdDaemonUnit
+	case "windows":
+		return `schtasks /Query /TN "` + WindowsScheduledTask + `" /V /FO LIST`
 	default:
 		return ""
+	}
+}
+
+// LoadServiceEnv loads KEY="value" pairs from the daemon env file written at
+// install time (see writeServiceEnvFile) into the process environment, setting
+// only variables that are not already present. On macOS/Linux the launchd/
+// systemd unit injects this file directly; on Windows a scheduled task cannot,
+// so the daemon loads it itself. Calling it on every platform is safe because it
+// never overwrites an already-set variable. Missing/unreadable file is a no-op.
+func LoadServiceEnv() {
+	stateDir, err := telemetry.DefaultStateDir()
+	if err != nil || strings.TrimSpace(stateDir) == "" {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "daemon.env"))
+	if err != nil {
+		return
+	}
+	for _, raw := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, quoted, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, present := os.LookupEnv(key); present {
+			continue
+		}
+		value := strings.TrimSpace(quoted)
+		if unquoted, err := strconv.Unquote(value); err == nil {
+			value = unquoted
+		}
+		_ = os.Setenv(key, value)
 	}
 }
 
@@ -90,6 +135,10 @@ func NewServiceManager(socketPath string) (ServiceManager, error) {
 			return ServiceManager{}, fmt.Errorf("resolve home dir: %w", err)
 		}
 		manager.unitPath = filepath.Join(home, ".config", "systemd", "user", SystemdDaemonUnit)
+	case "windows":
+		// The scheduled task isn't a file; we write the generated task XML here
+		// at install time so IsInstalled()/diagnostics have a stable marker.
+		manager.unitPath = filepath.Join(stateDir, "daemon.task.xml")
 	default:
 		manager.Kind = "unsupported"
 	}
@@ -97,7 +146,7 @@ func NewServiceManager(socketPath string) (ServiceManager, error) {
 }
 
 func (m ServiceManager) IsSupported() bool {
-	return m.Kind == "darwin" || m.Kind == "linux"
+	return m.Kind == "darwin" || m.Kind == "linux" || m.Kind == "windows"
 }
 
 func (m ServiceManager) IsInstalled() bool {
