@@ -98,6 +98,17 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 		allReqs = append(allReqs, reqs...)
 	}
 
+	// Drop collected events older than the retention window before they enter
+	// the store. Local-file telemetry sources (codex/opencode session logs,
+	// etc.) carry their full history, so without this floor every collect cycle
+	// re-ingests months of old-dated events that retention then deletes — a
+	// tug-of-war that keeps the DB bloated and retention permanently behind.
+	// Live hook events are always recent, so this only filters the re-import.
+	allReqs, droppedOld := filterReqsOlderThan(allReqs, s.retentionFloor())
+	if droppedOld > 0 && s.shouldLog("collect_floor_drop", time.Minute) {
+		s.infof("collect_floor_drop", "dropped_pre_retention=%d", droppedOld)
+	}
+
 	direct, retries := s.ingestBatch(ctx, allReqs)
 	if direct.ingested > 0 {
 		s.dataIngested.Store(true)
@@ -165,30 +176,79 @@ func (s *Service) pruneTelemetryOrphans(ctx context.Context) {
 }
 
 func (s *Service) runRetentionLoop(ctx context.Context) {
-	s.pruneOldData(ctx)
-	ticker := time.NewTicker(6 * time.Hour)
-	defer ticker.Stop()
+	// Steady-state cadence once the backlog is drained; a tighter cadence while
+	// catching up so a large one-time backlog (e.g. months accumulated while
+	// retention was stalled) drains in minutes instead of over many 6h ticks.
+	const idleInterval = 6 * time.Hour
+	const catchUpInterval = 1 * time.Minute
+
+	timer := time.NewTimer(0) // first run immediately
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			s.infof("retention_loop_stop", "reason=context_done")
 			return
-		case <-ticker.C:
-			s.pruneOldData(ctx)
+		case <-timer.C:
+			complete := s.pruneOldData(ctx)
+			if complete {
+				timer.Reset(idleInterval)
+			} else {
+				timer.Reset(catchUpInterval)
+			}
 		}
 	}
 }
 
-func (s *Service) pruneOldData(ctx context.Context) {
+// retentionDaysOrDefault resolves the configured retention window, defaulting
+// to 30 days when unset or invalid.
+func (s *Service) retentionDaysOrDefault() int {
+	cfg, err := config.Load()
+	if err != nil {
+		return 30
+	}
+	if cfg.Data.RetentionDays > 0 {
+		return cfg.Data.RetentionDays
+	}
+	return 30
+}
+
+// retentionFloor is the oldest occurred_at that collected events may have and
+// still be worth ingesting. Events before it would be pruned almost
+// immediately, so they are dropped at the door instead.
+func (s *Service) retentionFloor() time.Time {
+	return s.now().Add(-time.Duration(s.retentionDaysOrDefault()) * 24 * time.Hour)
+}
+
+// filterReqsOlderThan returns the requests whose OccurredAt is at or after floor
+// (keeping any with a zero timestamp, which are treated as "now"), plus the
+// count dropped. The input slice is filtered in place.
+func filterReqsOlderThan(reqs []telemetry.IngestRequest, floor time.Time) ([]telemetry.IngestRequest, int) {
+	kept := reqs[:0]
+	dropped := 0
+	for _, r := range reqs {
+		if !r.OccurredAt.IsZero() && r.OccurredAt.Before(floor) {
+			dropped++
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept, dropped
+}
+
+// pruneOldData runs one retention pass and reports whether the event backlog is
+// fully drained. A false return means the prune stopped early (budget/context)
+// and the caller should reschedule soon to keep catching up.
+func (s *Service) pruneOldData(ctx context.Context) (complete bool) {
 	if s == nil || s.store == nil {
-		return
+		return true
 	}
 	cfg, err := config.Load()
 	if err != nil {
 		if s.shouldLog("retention_config_error", 30*time.Second) {
 			s.warnf("retention_config_error", "error=%v", err)
 		}
-		return
+		return true
 	}
 	retentionDays := cfg.Data.RetentionDays
 	if retentionDays <= 0 {
@@ -208,13 +268,14 @@ func (s *Service) pruneOldData(ctx context.Context) {
 		s.infof("balance_prune", "thinned=%d retention_days=%d", thinned, retentionDays)
 	}
 
-	deleted, err := s.store.PruneOldEvents(pruneCtx, retentionDays)
+	deleted, drained, err := s.store.PruneOldEvents(pruneCtx, retentionDays)
 	if err != nil {
 		if s.shouldLog("retention_prune_error", 30*time.Second) {
 			s.warnf("retention_prune_error", "error=%v", err)
 		}
-		return
+		return false
 	}
+	complete = drained
 	if deleted > 0 {
 		s.infof("retention_prune", "deleted=%d retention_days=%d", deleted, retentionDays)
 		orphanCtx, orphanCancel := context.WithTimeout(ctx, 10*time.Second)
@@ -226,8 +287,14 @@ func (s *Service) pruneOldData(ctx context.Context) {
 			s.infof("retention_orphan_prune", "removed=%d", orphaned)
 		}
 
-		// Reclaim disk space after significant deletions.
-		if deleted > 1000 {
+		// Reclaim disk space only after a large backlog cleanup. A full VACUUM
+		// rewrites the whole file under an exclusive lock, blocking every reader
+		// for its duration (a source of read-model timeouts), so it must not run
+		// on routine daily deletions. Freed pages from small deletes are reused
+		// by SQLite in place; the file only needs compacting after a big purge
+		// (e.g. a first run that clears months of accumulated backlog).
+		const vacuumThreshold = 20000
+		if deleted > vacuumThreshold {
 			vacCtx, vacCancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer vacCancel()
 			if err := s.store.Vacuum(vacCtx); err != nil {
@@ -240,4 +307,5 @@ func (s *Service) pruneOldData(ctx context.Context) {
 			}
 		}
 	}
+	return complete
 }

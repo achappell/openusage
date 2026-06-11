@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -84,12 +85,75 @@ func OpenStore(path string) (*Store, error) {
 		}
 	}
 
+	// Reclaim disk from past corruption rotations. Each corruption event renames
+	// the DB to "<path>.corrupt.<ts>" and starts fresh; these snapshots are
+	// corrupt by definition and never read again, so they only waste disk (they
+	// have grown to multiple GB in the field). Keep the most recent one for
+	// forensics and delete the rest.
+	pruneCorruptBackups(path, 1)
+
 	store := NewStore(db)
 	if err := store.Init(context.Background()); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return store, nil
+}
+
+// pruneCorruptBackups removes old "<dbPath>.corrupt.*" snapshots, keeping the
+// newest `keep` by modification time. Best-effort: errors are logged but never
+// fatal. Companion -wal/-shm files for each removed snapshot are removed too.
+func pruneCorruptBackups(dbPath string, keep int) {
+	if keep < 0 {
+		keep = 0
+	}
+	matches, err := filepath.Glob(dbPath + ".corrupt.*")
+	if err != nil || len(matches) == 0 {
+		return
+	}
+	// Only consider the base snapshot files, not their -wal/-shm sidecars.
+	bases := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if strings.HasSuffix(m, "-wal") || strings.HasSuffix(m, "-shm") {
+			continue
+		}
+		bases = append(bases, m)
+	}
+	if len(bases) <= keep {
+		return
+	}
+	// Sort newest-first by modtime so the first `keep` are retained.
+	type backup struct {
+		path string
+		mod  time.Time
+	}
+	infos := make([]backup, 0, len(bases))
+	for _, b := range bases {
+		fi, statErr := os.Stat(b)
+		if statErr != nil {
+			continue
+		}
+		infos = append(infos, backup{path: b, mod: fi.ModTime()})
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].mod.After(infos[j].mod) })
+
+	var freed int64
+	removed := 0
+	for _, b := range infos[min(keep, len(infos)):] {
+		if fi, statErr := os.Stat(b.path); statErr == nil {
+			freed += fi.Size()
+		}
+		if rmErr := os.Remove(b.path); rmErr != nil {
+			log.Printf("telemetry: could not remove stale corrupt backup %s: %v", b.path, rmErr)
+			continue
+		}
+		_ = os.Remove(b.path + "-wal")
+		_ = os.Remove(b.path + "-shm")
+		removed++
+	}
+	if removed > 0 {
+		log.Printf("telemetry: removed %d stale corrupt DB backup(s), reclaimed %d MB", removed, freed/(1024*1024))
+	}
 }
 
 func NewStore(db *sql.DB) *Store {
@@ -769,21 +833,51 @@ func nullableFloat64(v *float64) interface{} {
 	return *v
 }
 
-// PruneOldEvents deletes usage_events older than retentionDays and returns the count deleted.
-func (s *Store) PruneOldEvents(ctx context.Context, retentionDays int) (int64, error) {
+// pruneEventsBatch is the number of rows PruneOldEvents deletes per statement.
+// Bounded so each DELETE holds the write lock briefly and the loop always makes
+// forward progress even under poll/checkpoint contention — a single unbounded
+// DELETE of a large backlog can lose its write-lock race and time out, which is
+// how retention silently stalled in the field (months of data accumulating
+// despite a correct 30-day policy).
+const pruneEventsBatch = 5000
+
+// PruneOldEvents deletes usage_events older than retentionDays in bounded
+// batches. It returns the number of rows deleted and whether the backlog was
+// fully drained (complete=false means it stopped early — context cancelled or
+// a batch error after partial progress — so a backlog remains and the caller
+// should reschedule soon rather than wait a full interval).
+func (s *Store) PruneOldEvents(ctx context.Context, retentionDays int) (deleted int64, complete bool, err error) {
 	if s == nil || s.db == nil || retentionDays <= 0 {
-		return 0, nil
+		return 0, true, nil
 	}
 	cutoff := fmt.Sprintf("-%d day", retentionDays)
-	result, err := s.db.ExecContext(ctx, `
-		DELETE FROM usage_events
-		WHERE occurred_at < datetime('now', ?)
-	`, cutoff)
-	if err != nil {
-		return 0, fmt.Errorf("telemetry: prune old events: %w", err)
+	for {
+		if ctx.Err() != nil {
+			return deleted, false, nil
+		}
+		// mattn/go-sqlite3 isn't built with the DELETE...LIMIT extension, so
+		// scope the delete via a subselect on the indexed occurred_at column.
+		result, execErr := s.db.ExecContext(ctx, `
+			DELETE FROM usage_events
+			WHERE event_id IN (
+				SELECT event_id FROM usage_events
+				WHERE occurred_at < datetime('now', ?)
+				ORDER BY occurred_at ASC
+				LIMIT ?
+			)
+		`, cutoff, pruneEventsBatch)
+		if execErr != nil {
+			if deleted > 0 {
+				return deleted, false, nil
+			}
+			return 0, false, fmt.Errorf("telemetry: prune old events: %w", execErr)
+		}
+		n, _ := result.RowsAffected()
+		deleted += n
+		if n < pruneEventsBatch {
+			return deleted, true, nil
+		}
 	}
-	deleted, _ := result.RowsAffected()
-	return deleted, nil
 }
 
 func (s *Store) PruneOrphanRawEvents(ctx context.Context, limit int) (int64, error) {
