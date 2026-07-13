@@ -401,7 +401,7 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 				Window: "month",
 			}
 			if subscription.MonthlyResetSec > 0 {
-				snap.Resets["monthly_usage_reset"] = snap.Timestamp.Add(
+				snap.Resets["monthly_usage_pct_reset"] = snap.Timestamp.Add(
 					time.Duration(subscription.MonthlyResetSec) * time.Second)
 			}
 		}
