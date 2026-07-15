@@ -202,7 +202,7 @@ jobs:
       - name: Generate Homebrew formula
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          REPO="janekbaraniewski/openusage"
+          REPO="achappell/openusage"
           BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
 
           mkdir -p /tmp/homebrew-formula
@@ -250,7 +250,7 @@ jobs:
 
                 Trust the whole tap once to keep openusage linked across upgrades:
 
-                  brew trust janekbaraniewski/tap
+                  brew trust achappell/tap
 
                 See https://docs.brew.sh/Tap-Trust for details.
               EOS
@@ -264,11 +264,23 @@ jobs:
 
           sed -i 's/^          //' /tmp/homebrew-formula/openusage.rb
 
-      - name: Push formula to Homebrew tap
+      - name: Configure Homebrew tap SSH access
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
-          git clone --branch master "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/janekbaraniewski/homebrew-tap.git" /tmp/homebrew-tap
+          test -n "${HOMEBREW_TAP_DEPLOY_KEY}" || {
+            echo "::error::HOMEBREW_TAP_DEPLOY_KEY is not configured"
+            exit 1
+          }
+          install -m 700 -d "${HOME}/.ssh"
+          printf '%s\n' "${HOMEBREW_TAP_DEPLOY_KEY}" > "${HOME}/.ssh/homebrew-tap-deploy-key"
+          chmod 600 "${HOME}/.ssh/homebrew-tap-deploy-key"
+          ssh-keyscan -H github.com >> "${HOME}/.ssh/known_hosts"
+
+      - name: Push formula to Homebrew tap
+        run: |
+          export GIT_SSH_COMMAND="ssh -i ${HOME}/.ssh/homebrew-tap-deploy-key -o IdentitiesOnly=yes"
+          git clone --branch master "git@github.com:achappell/homebrew-tap.git" /tmp/homebrew-tap
           mkdir -p /tmp/homebrew-tap/Formula
           cp /tmp/homebrew-formula/openusage.rb /tmp/homebrew-tap/Formula/openusage.rb
 

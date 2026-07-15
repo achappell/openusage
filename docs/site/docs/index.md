@@ -12,7 +12,7 @@ hide_table_of_contents: true
 Local-first terminal dashboard for AI tool spend, quotas, and rate limits across **19 providers** — Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, OpenAI, Anthropic, and more.
 
 ```bash
-brew install janekbaraniewski/tap/openusage
+brew install achappell/tap/openusage
 openusage telemetry daemon install
 openusage
 ```
@@ -20,7 +20,7 @@ openusage
 That is the entire setup. OpenUsage auto-detects installed AI tools and API keys on your workstation, the daemon collects data in the background, and the TUI shows live data in your terminal.
 
 :::tip Homebrew 6.0+
-Run `brew trust janekbaraniewski/tap` once so OpenUsage stays linked across `brew update`. See [Install](./getting-started/install.md#macos--homebrew-recommended) for why.
+Run `brew trust achappell/tap` once so OpenUsage stays linked across `brew update`. See [Install](./getting-started/install.md#macos--homebrew-recommended) for why.
 :::
 
 ![OpenUsage dashboard](/img/dashboard.png)

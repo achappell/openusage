@@ -39,7 +39,7 @@ The installer places `openusage` in `/usr/local/bin` when writable, otherwise in
 ### macOS (Homebrew)
 
 ```bash
-brew install janekbaraniewski/tap/openusage
+brew install achappell/tap/openusage
 ```
 
 ### From source (Go 1.25+)

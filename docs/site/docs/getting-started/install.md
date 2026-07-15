@@ -11,7 +11,7 @@ OpenUsage is a single Go binary. CGO is required (it links SQLite for the teleme
 ## macOS — Homebrew (recommended)
 
 ```bash
-brew install janekbaraniewski/tap/openusage
+brew install achappell/tap/openusage
 ```
 
 Upgrade later with:
@@ -30,13 +30,13 @@ later `brew update` that bumps OpenUsage can leave the keg installed but
 Trust the whole tap once so OpenUsage stays linked across every upgrade:
 
 ```bash
-brew trust janekbaraniewski/tap
+brew trust achappell/tap
 ```
 
 If you already hit the unlinked state, re-link the current keg with:
 
 ```bash
-brew link janekbaraniewski/tap/openusage
+brew link achappell/tap/openusage
 ```
 
 See the [Homebrew Tap Trust docs](https://docs.brew.sh/Tap-Trust) for details.
