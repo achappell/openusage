@@ -20,6 +20,7 @@ func dashboardWidget() core.DashboardWidget {
 			core.DashboardCompactRow{Label: "Lines", Keys: []string{"composer_lines_added", "composer_lines_removed", "scored_commits", "total_prompts"}, MaxSegments: 4},
 		),
 		providerbase.WithHideMetricKeys(
+			"codex_credit_reported_limit",
 			"plan_total_spend_usd", "plan_limit_usd", "plan_included_amount",
 			"team_budget_self", "team_budget_others",
 			"tool_calls_total", "tool_completed", "tool_errored", "tool_cancelled", "tool_success_rate",

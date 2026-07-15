@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -655,6 +656,65 @@ func SaveDashboardProviderHideCostsTo(path string, accountID string, hide *bool)
 			})
 		}
 	})
+}
+
+// SaveAccountCreditLimitOverride persists an advisory credit cap for an
+// account. Auto-detected accounts are promoted to manual accounts so the
+// existing account merge rules carry the setting into provider polling.
+func SaveAccountCreditLimitOverride(accountID string, limit *float64) error {
+	return SaveAccountCreditLimitOverrideTo(ConfigPath(), accountID, limit)
+}
+
+func SaveAccountCreditLimitOverrideTo(path, accountID string, limit *float64) error {
+	accountID = normalizeAccountID(accountID)
+	if accountID == "" {
+		return fmt.Errorf("save account credit limit: account_id must be non-empty")
+	}
+	return modifyConfig(path, func(cfg *Config) {
+		manualIndex := -1
+		detectedIndex := -1
+		for i := range cfg.Accounts {
+			if normalizeAccountID(cfg.Accounts[i].ID) == accountID {
+				manualIndex = i
+				break
+			}
+		}
+		for i := range cfg.AutoDetectedAccounts {
+			if normalizeAccountID(cfg.AutoDetectedAccounts[i].ID) == accountID {
+				detectedIndex = i
+				break
+			}
+		}
+
+		if manualIndex >= 0 {
+			cfg.Accounts[manualIndex].CreditLimitOverride = cloneFloat64(limit)
+			if limit == nil && detectedIndex >= 0 && accountsEqualIgnoringCreditLimit(cfg.Accounts[manualIndex], cfg.AutoDetectedAccounts[detectedIndex]) {
+				cfg.Accounts = append(cfg.Accounts[:manualIndex], cfg.Accounts[manualIndex+1:]...)
+			}
+			return
+		}
+		if limit != nil && detectedIndex >= 0 {
+			account := cfg.AutoDetectedAccounts[detectedIndex]
+			account.CreditLimitOverride = cloneFloat64(limit)
+			cfg.Accounts = append(cfg.Accounts, account)
+		}
+	})
+}
+
+func cloneFloat64(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func accountsEqualIgnoringCreditLimit(a, b core.AccountConfig) bool {
+	a.CreditLimitOverride = nil
+	b.CreditLimitOverride = nil
+	a.Token, b.Token = "", ""
+	a.RuntimeHints, b.RuntimeHints = nil, nil
+	return reflect.DeepEqual(a, b)
 }
 
 // SaveAutoDetected persists auto-detected accounts into the config file (read-modify-write).

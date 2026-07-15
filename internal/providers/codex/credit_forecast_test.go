@@ -217,3 +217,86 @@ func TestApplyRateLimitStatusIncludesCreditQuota(t *testing.T) {
 		t.Fatalf("expected near-limit status at 95%% credits used, got %s", snap.Status)
 	}
 }
+
+func TestApplyCreditLimitOverride(t *testing.T) {
+	snap := core.NewUsageSnapshot("codex", "codex-cli")
+	applyCreditLimitDetails(&creditLimitDetails{Limit: "7500", Used: "3200"}, &snap, "cli")
+	cap := 4000.0
+	applyCreditLimitOverride(&cap, &snap)
+
+	effective := snap.Metrics["codex_credit_limit"]
+	if effective.Limit == nil || *effective.Limit != 4000 || effective.Remaining == nil || *effective.Remaining != 800 {
+		t.Fatalf("unexpected effective metric: %+v", effective)
+	}
+	reported := snap.Metrics["codex_credit_reported_limit"]
+	if reported.Limit == nil || *reported.Limit != 7500 {
+		t.Fatalf("expected reported quota to remain 7500, got %+v", reported)
+	}
+	percent := snap.Metrics["codex_credit_percent_used"]
+	if percent.Used == nil || *percent.Used != 80 {
+		t.Fatalf("expected 80%% used against cap, got %+v", percent)
+	}
+	if snap.Raw["credit_limit_override_active"] != "true" {
+		t.Fatalf("expected active override metadata, got %+v", snap.Raw)
+	}
+}
+
+func TestApplyCreditLimitOverrideAlreadyExceeded(t *testing.T) {
+	snap := core.NewUsageSnapshot("codex", "codex-cli")
+	applyCreditLimitDetails(&creditLimitDetails{Limit: "7500", Used: "4500"}, &snap, "cli")
+	cap := 4000.0
+	applyCreditLimitOverride(&cap, &snap)
+
+	percent := snap.Metrics["codex_credit_percent_used"]
+	if percent.Used == nil || *percent.Used != 100 {
+		t.Fatalf("expected clamped 100%%, got %+v", percent)
+	}
+	p := New()
+	p.applyRateLimitStatus(&snap)
+	if snap.Status != core.StatusLimited {
+		t.Fatalf("expected LIMITED at personal cap, got %s", snap.Status)
+	}
+}
+
+func TestApplyCreditLimitOverrideIgnoresHigherCap(t *testing.T) {
+	snap := core.NewUsageSnapshot("codex", "codex-cli")
+	applyCreditLimitDetails(&creditLimitDetails{Limit: "7500", Used: "1000"}, &snap, "cli")
+	cap := 8000.0
+	applyCreditLimitOverride(&cap, &snap)
+	if got := *snap.Metrics["codex_credit_limit"].Limit; got != 7500 {
+		t.Fatalf("expected reported limit to remain effective, got %.0f", got)
+	}
+	if snap.Raw["credit_limit_override_active"] != "false" {
+		t.Fatalf("expected inactive override, got %+v", snap.Raw)
+	}
+}
+
+func TestApplyCreditLimitOverrideRejectsInvalidCap(t *testing.T) {
+	snap := core.NewUsageSnapshot("codex", "codex-cli")
+	applyCreditLimitDetails(&creditLimitDetails{Limit: "7500", Used: "1000"}, &snap, "cli")
+	cap := -1.0
+	applyCreditLimitOverride(&cap, &snap)
+
+	if got := *snap.Metrics["codex_credit_limit"].Limit; got != 7500 {
+		t.Fatalf("expected invalid cap to leave reported limit unchanged, got %.0f", got)
+	}
+	if snap.Diagnostics["credit_limit_override"] == "" {
+		t.Fatal("expected a non-fatal invalid-cap diagnostic")
+	}
+}
+
+func TestApplyCreditLimitOverrideWithoutReportedQuota(t *testing.T) {
+	snap := core.NewUsageSnapshot("codex", "codex-cli")
+	cap := 4000.0
+	applyCreditLimitOverride(&cap, &snap)
+
+	if _, ok := snap.Metrics["codex_credit_limit"]; ok {
+		t.Fatal("did not expect a synthetic credit quota")
+	}
+	if snap.Raw["credit_limit_override_configured"] != "4000" || snap.Raw["credit_limit_override_active"] != "false" {
+		t.Fatalf("expected configured but inactive metadata, got %+v", snap.Raw)
+	}
+	if snap.Diagnostics["credit_limit_override"] == "" {
+		t.Fatal("expected a missing-reported-quota diagnostic")
+	}
+}

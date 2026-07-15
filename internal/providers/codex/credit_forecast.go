@@ -3,6 +3,7 @@ package codex
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -124,6 +125,50 @@ func applyCreditLimitDetails(details *creditLimitDetails, snap *core.UsageSnapsh
 		snap.Raw["credit_limit_source"] = source
 	}
 	return true
+}
+
+func applyCreditLimitOverride(limitOverride *float64, snap *core.UsageSnapshot) {
+	if limitOverride == nil || snap == nil {
+		return
+	}
+	snap.EnsureMaps()
+	configured := *limitOverride
+	snap.Raw["credit_limit_override_configured"] = strconv.FormatFloat(configured, 'f', -1, 64)
+	snap.Raw["credit_limit_override_active"] = "false"
+	if configured <= 0 || math.IsNaN(configured) || math.IsInf(configured, 0) {
+		snap.Diagnostics["credit_limit_override"] = "ignored invalid personal credit cap"
+		return
+	}
+
+	metric, ok := snap.Metrics["codex_credit_limit"]
+	if !ok || metric.Limit == nil || metric.Used == nil || *metric.Limit <= 0 {
+		snap.Diagnostics["credit_limit_override"] = "personal credit cap configured but no reported quota is available"
+		return
+	}
+	reportedLimit := *metric.Limit
+	snap.Raw["credit_limit_reported"] = strconv.FormatFloat(reportedLimit, 'f', -1, 64)
+	snap.Raw["credit_limit_effective"] = strconv.FormatFloat(reportedLimit, 'f', -1, 64)
+	if configured >= reportedLimit {
+		return
+	}
+
+	reportedMetric := metric
+	snap.Metrics["codex_credit_reported_limit"] = reportedMetric
+	used := *metric.Used
+	remaining := math.Max(configured-used, 0)
+	metric.Limit = &configured
+	metric.Remaining = &remaining
+	snap.Metrics["codex_credit_limit"] = metric
+
+	usedPercent := math.Min(math.Max(used/configured*100, 0), 100)
+	remainingPercent := 100 - usedPercent
+	hundred := float64(100)
+	snap.Metrics["codex_credit_percent_used"] = core.Metric{
+		Limit: &hundred, Used: &usedPercent, Remaining: &remainingPercent,
+		Unit: "%", Window: metric.Window,
+	}
+	snap.Raw["credit_limit_override_active"] = "true"
+	snap.Raw["credit_limit_effective"] = strconv.FormatFloat(configured, 'f', -1, 64)
 }
 
 func (p *Provider) applyCreditForecast(snap *core.UsageSnapshot, accountID string) {

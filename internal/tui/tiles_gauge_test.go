@@ -289,6 +289,44 @@ func TestTileGaugeProjectionAnnotation_CodexCredits(t *testing.T) {
 	}
 }
 
+func TestTileGaugeProjectionAnnotation_CodexPersonalCap(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	usedPct := 80.0
+	cap := 4000.0
+	rate := 10.0
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"codex_credit_limit":     {Limit: &cap, Unit: "credits"},
+			"codex_credit_burn_rate": {Used: &rate, Unit: "credits/hour"},
+		},
+		Resets: map[string]time.Time{"codex_credit_limit": now.Add(48 * time.Hour)},
+		Raw:    map[string]string{"credit_limit_override_active": "true"},
+	}
+
+	out := tileCodexCreditProjectionAnnotation(snap, usedPct, now)
+	if !strings.Contains(out, "cap 4000") || !strings.Contains(out, "resets 2d") {
+		t.Fatalf("expected cap and reset annotation, got %q", out)
+	}
+}
+
+func TestTileGaugeProjectionAnnotation_CodexPersonalCapAfterReadModel(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	cap := 1000.0
+	reported := 7500.0
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"codex_credit_limit":          {Limit: &cap, Unit: "credits"},
+			"codex_credit_reported_limit": {Limit: &reported, Unit: "credits"},
+		},
+		Resets: map[string]time.Time{"codex_credit_limit": now.Add(48 * time.Hour)},
+	}
+
+	out := tileCodexCreditProjectionAnnotation(snap, 100, now)
+	if !strings.Contains(out, "cap 1000") {
+		t.Fatalf("expected reported-limit metric to preserve cap annotation, got %q", out)
+	}
+}
+
 func TestTileGaugeProjectionAnnotation_OvershootsWindow(t *testing.T) {
 	// User's reported scenario: 5h window started 1h 18m ago, 22% used.
 	// Pace = 0.22/78 = 0.002820/min → pctPerMinute = 0.2820.

@@ -334,6 +334,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	p.applyCursorCompatibilityMetrics(&snap)
+	applyCreditLimitOverride(acct.CreditLimitOverride, &snap)
 	p.applyCreditForecast(&snap, acct.ID)
 	p.applyRateLimitStatus(&snap)
 

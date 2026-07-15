@@ -33,22 +33,23 @@ OpenUsage registers the provider as soon as `~/.codex/` exists. Run the Codex CL
 
 ### Manual configuration
 
+Normally no manual account is needed. To set a lower personal credit budget, open **Settings → Providers**, select `codex-cli`, and press `l`. You can also configure the same advisory cap in JSON:
+
 ```json
 {
   "accounts": [
     {
-      "id": "codex",
+      "id": "codex-cli",
       "provider": "codex",
-      "extra": {
-        "config_dir": "~/.codex",
-        "sessions_dir": "~/.codex/sessions"
-      }
+      "auth": "local",
+      "binary": "codex",
+      "credit_limit_override": 4000
     }
   ]
 }
 ```
 
-Override `config_dir` and `sessions_dir` only if the CLI uses non-default paths.
+The personal cap is advisory: OpenUsage uses it for the credit percentage, burn forecast, runout estimate, and `LIMITED` status, but Codex continues to use its provider-reported quota. OpenUsage keeps that reported quota visible in the Codex detail view. Omit the field, clear it in Settings, or remove the manual account to restore provider-quota behavior.
 
 ## Data sources & how each metric is computed
 
@@ -87,6 +88,7 @@ The base URL for the live endpoint is, in order: `acct.BaseURL` → `extra.chatg
 
 - Source: `individualLimit` from the Codex CLI app-server `account/rateLimits/read` response. The response provides the current-period `limit`, cumulative `used` credits (or a remaining percentage), and the next `resetsAt` timestamp.
 - Transform: `codex_credit_limit` contains used/remaining/total credits, while `codex_credit_percent_used` drives the primary dashboard gauge.
+- Personal cap: when `credit_limit_override` is lower than the reported quota, `codex_credit_limit` becomes the effective advisory limit and `codex_credit_reported_limit` retains the authoritative quota. Usage remains the authoritative cumulative amount.
 - Forecast: when the next monthly reset is available, OpenUsage infers the preceding calendar-month boundary and calculates the average burn rate from cumulative current-period usage divided by elapsed time since that boundary. The dashboard shows the reset countdown and projected percentage at reset. Without a usable reset timestamp, it falls back to successive observed quota samples.
 - Forecast source is recorded as `inferred_period_start` or `observed_usage` so the estimate is distinguishable from authoritative quota data.
 

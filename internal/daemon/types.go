@@ -157,9 +157,10 @@ type ingestTally struct {
 
 // providerPollState tracks per-account state for change detection and adaptive backoff.
 type providerPollState struct {
-	lastFetchAt time.Time
-	lastSnap    core.UsageSnapshot
-	hasSnap     bool
+	lastFetchAt         time.Time
+	lastSnap            core.UsageSnapshot
+	creditLimitOverride *float64
+	hasSnap             bool
 }
 
 type SnapshotFrame struct {

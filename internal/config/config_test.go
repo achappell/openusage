@@ -1139,3 +1139,59 @@ func TestExportTargetPreservedAcrossModifyConfig(t *testing.T) {
 		t.Errorf("export.machine_name = %q after SaveAutoDetected, want mybox", cfg.Export.MachineName)
 	}
 }
+
+func TestSaveAccountCreditLimitOverridePromotesAndClearsDetectedAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	detected := core.AccountConfig{ID: "codex-cli", Provider: "codex", Auth: "local", Binary: "/usr/local/bin/codex"}
+	if err := SaveTo(path, Config{AutoDetectedAccounts: []core.AccountConfig{detected}}); err != nil {
+		t.Fatal(err)
+	}
+
+	limit := 4000.0
+	if err := SaveAccountCreditLimitOverrideTo(path, "codex-cli", &limit); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Accounts) != 1 || cfg.Accounts[0].CreditLimitOverride == nil || *cfg.Accounts[0].CreditLimitOverride != limit {
+		t.Fatalf("expected promoted account with %.0f cap, got %+v", limit, cfg.Accounts)
+	}
+	if cfg.Accounts[0].Binary != detected.Binary {
+		t.Fatalf("expected detected fields to be preserved, got %+v", cfg.Accounts[0])
+	}
+
+	if err := SaveAccountCreditLimitOverrideTo(path, "codex-cli", nil); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Accounts) != 0 {
+		t.Fatalf("expected promoted-only account to be removed after clear, got %+v", cfg.Accounts)
+	}
+}
+
+func TestSaveAccountCreditLimitOverrideKeepsCustomizedManualAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	limit := 2500.0
+	cfg := Config{
+		Accounts:             []core.AccountConfig{{ID: "codex-cli", Provider: "codex", Binary: "/custom/codex", CreditLimitOverride: &limit}},
+		AutoDetectedAccounts: []core.AccountConfig{{ID: "codex-cli", Provider: "codex", Binary: "/usr/bin/codex"}},
+	}
+	if err := SaveTo(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveAccountCreditLimitOverrideTo(path, "codex-cli", nil); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Accounts) != 1 || loaded.Accounts[0].CreditLimitOverride != nil || loaded.Accounts[0].Binary != "/custom/codex" {
+		t.Fatalf("expected customized manual account with cleared cap, got %+v", loaded.Accounts)
+	}
+}

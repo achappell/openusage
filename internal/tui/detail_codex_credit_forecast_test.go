@@ -32,3 +32,38 @@ func TestBuildDetailCodexCreditForecastSection(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildDetailCodexCreditForecastSectionWithPersonalCap(t *testing.T) {
+	used := 3200.0
+	cap := 4000.0
+	reported := 7500.0
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"codex_credit_limit":          {Used: &used, Limit: &cap, Unit: "credits"},
+			"codex_credit_reported_limit": {Used: &used, Limit: &reported, Unit: "credits"},
+		},
+		Raw: map[string]string{"credit_limit_override_active": "true"},
+	}
+
+	output := strings.Join(buildDetailCodexCreditForecastSection(snap, 100), "\n")
+	for _, want := range []string{"3200 / 4000 credits (80%)", "Personal Cap", "4000 credits (advisory)", "Reported Quota", "7500 credits"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected output to contain %q, got %q", want, output)
+		}
+	}
+}
+
+func TestBuildDetailCodexCreditForecastSectionWithReadModelMetrics(t *testing.T) {
+	used := 3273.4
+	cap := 1000.0
+	reported := 7500.0
+	snap := core.UsageSnapshot{Metrics: map[string]core.Metric{
+		"codex_credit_limit":          {Used: &used, Limit: &cap, Unit: "credits"},
+		"codex_credit_reported_limit": {Used: &used, Limit: &reported, Unit: "credits"},
+	}}
+
+	output := strings.Join(buildDetailCodexCreditForecastSection(snap, 100), "\n")
+	if !strings.Contains(output, "3273 / 1000 credits (100%)") || !strings.Contains(output, "Personal Cap") || !strings.Contains(output, "Reported Quota") {
+		t.Fatalf("expected cap labels from read-model metrics, got %q", output)
+	}
+}

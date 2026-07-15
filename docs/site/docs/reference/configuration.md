@@ -361,6 +361,9 @@ Manually configured provider accounts. Account `id` must be unique across `accou
 | `base_url` | string | Override the provider's base URL. Common for self-hosted Ollama or alternate Moonshot endpoints. |
 | `binary` | string | For non-API providers, the path or name of the local binary or file (e.g. `gh` for Copilot, the Gemini CLI binary, the Claude state file path). |
 | `probe_model` | string | For header-probing providers, the model to send a minimal request against. |
+| `credit_limit_override` | number | Optional advisory personal credit cap. Currently used by Codex for percentages, forecasts, and limit status. |
+
+For Codex, the cap can also be set from **Settings → Providers**: select the `codex-cli` row and press `l`. Saving a cap for an auto-detected account preserves its detected configuration automatically; clearing it restores normal auto-detection. This is a monitoring budget only and does not stop Codex requests.
 
 :::warning API keys are never stored
 The `api_key_env` field stores the **name** of the environment variable, not its value. The TUI reads the value from your shell at runtime. Don't put plaintext API keys in `settings.json`.
