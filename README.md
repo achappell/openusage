@@ -28,25 +28,27 @@ Run it side-by-side with your coding agent:
 
 ## Install
 
-### macOS (Homebrew, recommended)
+### All platforms (recommended)
+
+```bash
+curl -fsSL https://github.com/achappell/openusage/releases/latest/download/install.sh | bash
+```
+
+The installer places `openusage` in `/usr/local/bin` when writable, otherwise in `~/.local/bin`. Override the destination with `OPENUSAGE_INSTALL_DIR`.
+
+### macOS (Homebrew)
 
 ```bash
 brew install janekbaraniewski/tap/openusage
 ```
 
-### All platforms (quick install script)
-
-```bash
-curl -fsSL https://github.com/janekbaraniewski/openusage/releases/latest/download/install.sh | bash
-```
-
 ### From source (Go 1.25+)
 
 ```bash
-go install github.com/janekbaraniewski/openusage/cmd/openusage@latest
+go install github.com/achappell/openusage/cmd/openusage@main
 ```
 
-Requires CGO (`CGO_ENABLED=1`). Pre-built binaries are also available on the [Releases](https://github.com/janekbaraniewski/openusage/releases) page.
+Requires CGO (`CGO_ENABLED=1`). Pre-built binaries are also available on the [Releases](https://github.com/achappell/openusage/releases) page.
 
 ## Run
 

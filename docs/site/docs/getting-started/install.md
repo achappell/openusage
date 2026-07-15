@@ -45,7 +45,7 @@ See the [Homebrew Tap Trust docs](https://docs.brew.sh/Tap-Trust) for details.
 ## All platforms — install script
 
 ```bash
-curl -fsSL https://github.com/janekbaraniewski/openusage/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/achappell/openusage/releases/latest/download/install.sh | bash
 ```
 
 The script picks the right binary for your OS/arch and drops it into `/usr/local/bin/openusage` (or another writable directory in your `PATH`).
@@ -53,13 +53,13 @@ The script picks the right binary for your OS/arch and drops it into `/usr/local
 :::tip
 Read the script first if you prefer:
 ```bash
-curl -fsSL https://github.com/janekbaraniewski/openusage/releases/latest/download/install.sh | less
+curl -fsSL https://github.com/achappell/openusage/releases/latest/download/install.sh | less
 ```
 :::
 
 ## Pre-built binaries
 
-Download a release archive directly from the [GitHub releases page](https://github.com/janekbaraniewski/openusage/releases) and put `openusage` somewhere on your `PATH`.
+Download a release archive directly from the [GitHub releases page](https://github.com/achappell/openusage/releases) and put `openusage` somewhere on your `PATH`.
 
 Available targets:
 
@@ -70,7 +70,7 @@ Available targets:
 ## From source (Go 1.25+)
 
 ```bash
-go install github.com/janekbaraniewski/openusage/cmd/openusage@latest
+go install github.com/achappell/openusage/cmd/openusage@main
 ```
 
 `CGO_ENABLED=1` must be on (it is by default on macOS and most Linux distros). On systems without a C toolchain, install one first:
