@@ -44,12 +44,11 @@ func (m Model) handleSettingsTabProvidersKey(msg tea.KeyMsg, ids []string) (Mode
 		return m, m.persistDashboardPrefsCmd(), true
 	case "l":
 		if len(ids) == 0 {
-			return m, nil, true
+			return m, nil, false
 		}
 		id := ids[clamp(m.settings.cursor, 0, len(ids)-1)]
 		if m.accountProviders[id] != "codex" {
-			m.settings.status = "credit caps are available for Codex"
-			return m, nil, true
+			return m, nil, false
 		}
 		m.settings.creditLimitEditing = true
 		m.settings.creditLimitEditAccountID = id
