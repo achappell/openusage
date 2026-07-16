@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.24.0 (2026-07-16)
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.23.0...v0.24.0
+
 ## [0.23.0](https://github.com/janekbaraniewski/openusage/compare/v0.22.0...v0.23.0) (2026-07-05)
 
 
