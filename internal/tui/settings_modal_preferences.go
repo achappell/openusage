@@ -100,6 +100,19 @@ func (m Model) apiKeysTabIDs() []string {
 	return ids
 }
 
+// selectedAPIKeyRowSupportsBrowserSession reports whether the Keys tab row
+// currently under the cursor supports browser-session auth — controls
+// whether the c/b/x keybindings (read cookie / open site / disconnect) are
+// shown in the footer, since they only do something on that specific row.
+func (m Model) selectedAPIKeyRowSupportsBrowserSession() bool {
+	ids := m.apiKeysTabIDs()
+	if len(ids) == 0 {
+		return false
+	}
+	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
+	return supportsBrowserSessionProvider(providerForAccountID(ids[cursor], m.accountProviders))
+}
+
 func providerForAccountID(accountID string, accountProviders map[string]string) string {
 	if providerID := strings.TrimSpace(accountProviders[accountID]); providerID != "" {
 		return providerID
@@ -224,18 +237,6 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 	}
 	if m.settings.apiKeyStatus != "" && !m.settings.apiKeyEditing {
 		lines = append(lines, "", dimStyle.Render("  "+m.settings.apiKeyStatus))
-	}
-	// Help line that explains the new keybindings only when at least one
-	// browser-session row is in view.
-	hasBrowserRows := false
-	for _, id := range ids {
-		if supportsBrowserSessionProvider(providerForAccountID(id, m.accountProviders)) {
-			hasBrowserRows = true
-			break
-		}
-	}
-	if hasBrowserRows {
-		lines = append(lines, "", dimStyle.Render("  Enter: configure primary auth · c: read browser cookie · b: open site · x: disconnect browser session · d: delete API key"))
 	}
 	return padToSize(strings.Join(lines, "\n"), w, h)
 }
