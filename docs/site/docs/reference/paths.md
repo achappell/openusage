@@ -22,6 +22,10 @@ OpenUsage follows the [XDG Base Directory Specification](https://specifications.
 | `~/.local/state/openusage/daemon.stdout.log` | Daemon stdout when running as a service. | — |
 | `~/.local/state/openusage/daemon.stderr.log` | Daemon stderr when running as a service. | — |
 
+When OpenUsage saves `settings.json`, it follows an existing symlink chain and
+writes to the real target file, preserving the symlink. A broken symlink is
+reported as an error rather than replaced.
+
 ## Service files
 
 | Path | OS | Purpose |
