@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.24.1 (2026-07-18)
+
+<!-- Release notes generated using configuration in .github/release.yml at v0.24.1 -->
+
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.24.0...v0.24.1
+
 ## 0.24.0 (2026-07-16)
 
 **Full Changelog**: https://github.com/achappell/openusage/compare/v0.23.0...v0.24.0
