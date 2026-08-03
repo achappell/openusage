@@ -287,13 +287,14 @@ func tileGaugeProjectionAnnotation(snap core.UsageSnapshot, key string, met core
 
 func tileCodexCreditProjectionAnnotation(snap core.UsageSnapshot, usedPct float64, now time.Time) string {
 	resetAt, hasReset := snap.Resets["codex_credit_limit"]
-	resetIn := time.Duration(0)
+	if !hasReset {
+		return ""
+	}
+
+	resetIn := resetAt.Sub(now)
 	resetPart := ""
-	if hasReset {
-		resetIn = resetAt.Sub(now)
-		if resetIn > 0 {
-			resetPart = "resets " + formatDurationShort(resetIn)
-		}
+	if resetIn > 0 {
+		resetPart = "resets " + formatDurationShort(resetIn)
 	}
 	capPart := ""
 	if codexCreditOverrideActive(snap) {
