@@ -1,18 +1,22 @@
 # Changelog
 
-## 0.25.0 (2026-08-03)
+## 0.24.3 (2026-08-03)
 
-<!-- Release notes generated using configuration in .github/release.yml at main -->
+### Features
+* **Codex** — add credit forecasting (burn rate projection, runout hours at current pace)
+* **Themes** — add Catppuccin Frappé theme variant
 
-## What's Changed
-### Other Changes
-* chore: sync upstream main into fork by @achappell in https://github.com/achappell/openusage/pull/2
+### Bug Fixes
+* **core** — preserve full model lineage version in Canonical model identifier for Claude models
+* **tui** — scope browser-session footer hint to the selected row
+* **tui** — surface browser-session keybindings in the persistent Keys tab footer
+* **config** — follow symlink chain when saving config
+* **tests** — anchor time-dependent tests to a single instant to fix UTC midnight flakes
 
-## New Contributors
-* @github-actions[bot] made their first contribution in https://github.com/achappell/openusage/pull/1
-* @achappell made their first contribution in https://github.com/achappell/openusage/pull/2
+### Performance
+* **daemon** — gate on-demand read-model refresh on new data arrival
 
-**Full Changelog**: https://github.com/achappell/openusage/compare/v0.24.0...v0.25.0
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.24.2...v0.24.3
 
 ## 0.24.0 (2026-07-16)
 
