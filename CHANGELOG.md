@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.25.0 (2026-08-03)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* chore: sync upstream main into fork by @achappell in https://github.com/achappell/openusage/pull/2
+
+## New Contributors
+* @github-actions[bot] made their first contribution in https://github.com/achappell/openusage/pull/1
+* @achappell made their first contribution in https://github.com/achappell/openusage/pull/2
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.24.0...v0.25.0
+
 ## 0.24.0 (2026-07-16)
 
 **Full Changelog**: https://github.com/achappell/openusage/compare/v0.23.0...v0.24.0
