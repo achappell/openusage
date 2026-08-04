@@ -247,6 +247,11 @@ func hydrateRootsFromLimitSnapshots(ctx context.Context, db *sql.DB, snaps map[s
 		if latest != nil {
 			metricsBefore := len(s.Metrics)
 			s = mergeLimitSnapshotRoot(s, *latest)
+			var restoreErr error
+			s, restoreErr = restoreLastKnownCodexCreditQuota(ctx, db, s)
+			if restoreErr != nil {
+				return snaps, restoreErr
+			}
 			core.Tracef("[hydrate] %s/%s: limit_snapshot found, metrics %d→%d", providerID, effectiveAccountID, metricsBefore, len(s.Metrics))
 		} else {
 			core.Tracef("[hydrate] %s/%s: no limit_snapshot in DB, metrics=%d", providerID, effectiveAccountID, len(s.Metrics))
@@ -367,6 +372,72 @@ func mergeLimitSnapshotRoot(base core.UsageSnapshot, root core.UsageSnapshot) co
 		merged.Raw = map[string]string{}
 	}
 	return merged
+}
+
+func restoreLastKnownCodexCreditQuota(ctx context.Context, db *sql.DB, snap core.UsageSnapshot) (core.UsageSnapshot, error) {
+	if strings.ToLower(strings.TrimSpace(snap.ProviderID)) != "codex" || hasUsableCodexCreditPercent(snap) {
+		return snap, nil
+	}
+
+	previous, err := loadLatestCodexCreditSnapshot(ctx, db, snap.ProviderID, snap.AccountID)
+	if err != nil || previous == nil {
+		return snap, err
+	}
+	if resetAt, ok := previous.Resets["codex_credit_limit"]; ok && !resetAt.After(time.Now()) {
+		return snap, nil
+	}
+
+	snap.EnsureMaps()
+	for key, metric := range previous.Metrics {
+		if strings.HasPrefix(key, "codex_credit_") {
+			snap.Metrics[key] = metric
+		}
+	}
+	for key, resetAt := range previous.Resets {
+		if strings.HasPrefix(key, "codex_credit_") {
+			snap.Resets[key] = resetAt
+		}
+	}
+	if hasUsableCodexCreditPercent(snap) {
+		snap.Attributes["credit_quota_stale"] = "true"
+		snap.Diagnostics["credit_quota"] = "using last known quota because the latest poll omitted Codex credit data"
+	}
+	return snap, nil
+}
+
+func hasUsableCodexCreditPercent(snap core.UsageSnapshot) bool {
+	metric, ok := snap.Metrics["codex_credit_percent_used"]
+	return ok && metric.Unit == "%" && metric.Limit != nil && metric.Used != nil
+}
+
+func loadLatestCodexCreditSnapshot(ctx context.Context, db *sql.DB, providerID, accountID string) (*core.UsageSnapshot, error) {
+	var (
+		payload    string
+		occurredAt string
+	)
+	err := db.QueryRowContext(ctx, `
+		SELECT r.source_payload, e.occurred_at
+		FROM usage_events e
+		JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
+		WHERE e.event_type = 'limit_snapshot'
+		  AND e.provider_id = ?
+		  AND e.account_id = ?
+		  AND r.source_system = ?
+		  AND json_extract(r.source_payload, '$.snapshot.metrics.codex_credit_percent_used') IS NOT NULL
+		ORDER BY e.occurred_at DESC
+		LIMIT 1
+	`, providerID, accountID, string(SourceSystemPoller)).Scan(&payload, &occurredAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load latest Codex credit snapshot (%s/%s): %w", providerID, accountID, err)
+	}
+	decoded, ok := decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt)
+	if !ok {
+		return nil, nil
+	}
+	return &decoded, nil
 }
 
 func annotateUnmappedTelemetryProviders(

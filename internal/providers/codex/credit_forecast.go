@@ -17,10 +17,15 @@ import (
 type creditLimitDetails struct {
 	Limit              any `json:"limit,omitempty"`
 	Used               any `json:"used,omitempty"`
+	UsedPercent        any `json:"used_percent,omitempty"`
+	UsedPercentV2      any `json:"usedPercent,omitempty"`
+	Remaining          any `json:"remaining,omitempty"`
 	RemainingPercent   any `json:"remaining_percent,omitempty"`
 	RemainingPercentV2 any `json:"remainingPercent,omitempty"`
 	ResetsAt           any `json:"resets_at,omitempty"`
 	ResetsAtV2         any `json:"resetsAt,omitempty"`
+	ResetAt            any `json:"reset_at,omitempty"`
+	ResetAtV2          any `json:"resetAt,omitempty"`
 }
 
 type creditUsageObservation struct {
@@ -78,14 +83,27 @@ func applyCreditLimitDetails(details *creditLimitDetails, snap *core.UsageSnapsh
 
 	used, hasUsed := parseFlexibleNumber(details.Used)
 	if !hasUsed {
-		remainingPercent, hasRemainingPercent := parseFlexibleNumber(details.RemainingPercent)
-		if !hasRemainingPercent {
-			remainingPercent, hasRemainingPercent = parseFlexibleNumber(details.RemainingPercentV2)
+		usedPercent, hasUsedPercent := parseFlexibleNumber(details.UsedPercent)
+		if !hasUsedPercent {
+			usedPercent, hasUsedPercent = parseFlexibleNumber(details.UsedPercentV2)
 		}
-		if !hasRemainingPercent {
+		if hasUsedPercent {
+			used = limit * clampPercent(usedPercent) / 100
+		} else if remaining, hasRemaining := parseFlexibleNumber(details.Remaining); hasRemaining {
+			used = limit - remaining
+		} else {
+			remainingPercent, hasRemainingPercent := parseFlexibleNumber(details.RemainingPercent)
+			if !hasRemainingPercent {
+				remainingPercent, hasRemainingPercent = parseFlexibleNumber(details.RemainingPercentV2)
+			}
+			if !hasRemainingPercent {
+				return false
+			}
+			used = limit * (100 - clampPercent(remainingPercent)) / 100
+		}
+		if math.IsNaN(used) || math.IsInf(used, 0) {
 			return false
 		}
-		used = limit * (100 - clampPercent(remainingPercent)) / 100
 	}
 
 	if used < 0 {
@@ -117,6 +135,12 @@ func applyCreditLimitDetails(details *creditLimitDetails, snap *core.UsageSnapsh
 	resetAt, hasReset := parseFlexibleNumber(details.ResetsAt)
 	if !hasReset {
 		resetAt, hasReset = parseFlexibleNumber(details.ResetsAtV2)
+	}
+	if !hasReset {
+		resetAt, hasReset = parseFlexibleNumber(details.ResetAt)
+	}
+	if !hasReset {
+		resetAt, hasReset = parseFlexibleNumber(details.ResetAtV2)
 	}
 	if hasReset && resetAt > 0 {
 		snap.Resets["codex_credit_limit"] = time.Unix(int64(resetAt), 0)

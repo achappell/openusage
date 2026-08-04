@@ -111,7 +111,11 @@ func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) usageApp
 	summary.limitMetricsApplied += applyUsageLimitDetails(payload.RateLimit, "rate_limit_primary", "rate_limit_secondary", snap)
 	summary.limitMetricsApplied += applyUsageLimitDetails(payload.CodeReviewRateLimit, "rate_limit_code_review_primary", "rate_limit_code_review_secondary", snap)
 	summary.limitMetricsApplied += applyUsageAdditionalLimits(payload.AdditionalRateLimits, snap)
-	applyCreditLimitDetails(firstCreditLimit(payload.IndividualLimitV2, payload.IndividualLimit), snap, "live")
+	creditLimit := firstCreditLimit(payload.IndividualLimitV2, payload.IndividualLimit)
+	if creditLimit == nil && payload.SpendControl != nil {
+		creditLimit = firstCreditLimit(payload.SpendControl.IndividualLimitV2, payload.SpendControl.IndividualLimit)
+	}
+	applyCreditLimitDetails(creditLimit, snap, "live")
 
 	if payload.RateLimitStatus != nil {
 		status := payload.RateLimitStatus
@@ -121,7 +125,11 @@ func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) usageApp
 		summary.limitMetricsApplied += applyUsageLimitDetails(status.RateLimit, "rate_limit_primary", "rate_limit_secondary", snap)
 		summary.limitMetricsApplied += applyUsageLimitDetails(status.CodeReviewRateLimit, "rate_limit_code_review_primary", "rate_limit_code_review_secondary", snap)
 		summary.limitMetricsApplied += applyUsageAdditionalLimits(status.AdditionalRateLimits, snap)
-		applyCreditLimitDetails(firstCreditLimit(status.IndividualLimitV2, status.IndividualLimit), snap, "live")
+		creditLimit := firstCreditLimit(status.IndividualLimitV2, status.IndividualLimit)
+		if creditLimit == nil && status.SpendControl != nil {
+			creditLimit = firstCreditLimit(status.SpendControl.IndividualLimitV2, status.SpendControl.IndividualLimit)
+		}
+		applyCreditLimitDetails(creditLimit, snap, "live")
 		if payload.Credits == nil {
 			applyUsageCredits(status.Credits, snap)
 		}

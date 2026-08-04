@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -262,6 +263,27 @@ func compactMetricLabel(widget core.DashboardWidget, key string) string {
 }
 
 func compactMetricValue(key string, met core.Metric) string {
+	// Codex credits are already grouped under a "Credits" row. Repeating the
+	// unit in every segment makes the compact row needlessly wide and causes
+	// the useful runout value to be truncated on normal tile widths.
+	switch key {
+	case "codex_credit_limit":
+		if value := compactCodexCreditLimit(met); value != "" {
+			return value
+		}
+	case "codex_credit_burn_rate":
+		if met.Used != nil {
+			return compactDecimal(*met.Used) + "/h"
+		}
+	case "codex_credit_runout_hours":
+		if met.Used != nil {
+			if *met.Used <= 0 {
+				return "now"
+			}
+			return compactDecimal(*met.Used) + "h"
+		}
+	}
+
 	if key == "burn_rate" && met.Used != nil {
 		return fmt.Sprintf("%s/h", formatUSD(*met.Used))
 	}
@@ -306,6 +328,32 @@ func compactMetricValue(key string, met core.Metric) string {
 	}
 
 	return ""
+}
+
+func compactCodexCreditLimit(met core.Metric) string {
+	used, hasUsed := metricUsedValue(met)
+	if met.Limit != nil {
+		if hasUsed {
+			return fmt.Sprintf("%s/%s", shortCompact(used), shortCompact(*met.Limit))
+		}
+		return shortCompact(*met.Limit)
+	}
+	if hasUsed {
+		return shortCompact(used)
+	}
+	if met.Remaining != nil {
+		return shortCompact(*met.Remaining) + " left"
+	}
+	return ""
+}
+
+func compactDecimal(v float64) string {
+	value := strconv.FormatFloat(v, 'f', 2, 64)
+	value = strings.TrimRight(strings.TrimRight(value, "0"), ".")
+	if value == "-0" {
+		return "0"
+	}
+	return value
 }
 
 func metricUsedValue(met core.Metric) (float64, bool) {

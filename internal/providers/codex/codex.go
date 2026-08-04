@@ -117,6 +117,7 @@ type usagePayload struct {
 	Credits              *usageCredits          `json:"credits,omitempty"`
 	IndividualLimit      *creditLimitDetails    `json:"individual_limit,omitempty"`
 	IndividualLimitV2    *creditLimitDetails    `json:"individualLimit,omitempty"`
+	SpendControl         *spendControl          `json:"spend_control,omitempty"`
 	RateLimitStatus      *usageRateLimitStatus  `json:"rate_limit_status,omitempty"`
 }
 
@@ -128,6 +129,12 @@ type usageRateLimitStatus struct {
 	Credits              *usageCredits          `json:"credits,omitempty"`
 	IndividualLimit      *creditLimitDetails    `json:"individual_limit,omitempty"`
 	IndividualLimitV2    *creditLimitDetails    `json:"individualLimit,omitempty"`
+	SpendControl         *spendControl          `json:"spend_control,omitempty"`
+}
+
+type spendControl struct {
+	IndividualLimit   *creditLimitDetails `json:"individual_limit,omitempty"`
+	IndividualLimitV2 *creditLimitDetails `json:"individualLimit,omitempty"`
 }
 
 type usageLimitDetails struct {

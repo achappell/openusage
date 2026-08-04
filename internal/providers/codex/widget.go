@@ -13,7 +13,10 @@ func dashboardWidget() core.DashboardWidget {
 			"plan_auto_percent_used", "plan_api_percent_used", "cache_hit_ratio",
 		),
 		providerbase.WithCompactRows(
-			core.DashboardCompactRow{Label: "Credits", Keys: []string{"codex_credit_percent_used", "codex_credit_limit", "codex_credit_burn_rate", "codex_credit_runout_hours", "credit_balance"}, MaxSegments: 5},
+			// The balance is a fallback when quota data is absent; when the four
+			// quota fields exist it duplicates the credit-limit summary and only
+			// makes the compact row overflow.
+			core.DashboardCompactRow{Label: "Credits", Keys: []string{"codex_credit_percent_used", "codex_credit_limit", "codex_credit_burn_rate", "codex_credit_runout_hours", "credit_balance"}, MaxSegments: 4},
 			core.DashboardCompactRow{Label: "Team", Keys: []string{"team_size", "team_owners"}, MaxSegments: 4},
 			core.DashboardCompactRow{Label: "Usage", Keys: []string{"plan_percent_used", "plan_auto_percent_used", "plan_api_percent_used", "composer_context_pct"}, MaxSegments: 4},
 			core.DashboardCompactRow{Label: "Activity", Keys: []string{"requests_today", "total_ai_requests", "composer_sessions", "composer_requests"}, MaxSegments: 4},

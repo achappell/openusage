@@ -51,6 +51,41 @@ func TestApplyCreditLimitDetails(t *testing.T) {
 	}
 }
 
+func TestApplyUsagePayloadNestedSpendControl(t *testing.T) {
+	var payload usagePayload
+	if err := json.Unmarshal([]byte(`{
+		"plan_type": "business",
+		"credits": {"has_credits": true, "unlimited": false, "balance": null},
+		"spend_control": {
+			"individual_limit": {
+				"limit": "75000",
+				"used": "3575.2862000465393",
+				"remaining": "71424.71379995346",
+				"used_percent": 5,
+				"remaining_percent": 95,
+				"reset_at": 1785542401
+			}
+		}
+	}`), &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := core.NewUsageSnapshot("codex", "test")
+	applyUsagePayload(&payload, &snap)
+
+	metric, ok := snap.Metrics["codex_credit_limit"]
+	if !ok || metric.Limit == nil || *metric.Limit != 75000 || metric.Used == nil || *metric.Used < 3575.28 || *metric.Used > 3575.29 {
+		t.Fatalf("unexpected nested credit metric: %+v", metric)
+	}
+	percent, ok := snap.Metrics["codex_credit_percent_used"]
+	if !ok || percent.Used == nil || *percent.Used < 4.76 || *percent.Used > 4.77 {
+		t.Fatalf("unexpected nested credit percentage: %+v", percent)
+	}
+	if got := snap.Resets["codex_credit_limit"].Unix(); got != 1785542401 {
+		t.Fatalf("reset = %d, want 1785542401", got)
+	}
+}
+
 func TestApplyCodexCLIRateLimits(t *testing.T) {
 	snap := core.NewUsageSnapshot("codex", "test")
 	resultJSON := []byte(`{

@@ -135,6 +135,74 @@ func TestApplyCanonicalTelemetryView_UsesBaseWhenNoRootSnapshot(t *testing.T) {
 	}
 }
 
+func TestApplyCanonicalTelemetryView_RestoresLastKnownCodexCreditQuota(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	quotaIngestor := NewQuotaSnapshotIngestor(store)
+	limit := 7500.0
+	used := 1250.0
+	remaining := 6250.0
+	percent := 16.6666666667
+	remainingPercent := 100 - percent
+	hundred := 100.0
+	resetAt := time.Now().Add(24 * time.Hour).UTC()
+	good := core.UsageSnapshot{
+		ProviderID: "codex",
+		AccountID:  "codex-cli",
+		Timestamp:  time.Now().Add(-2 * time.Minute).UTC(),
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"codex_credit_limit":        {Limit: &limit, Used: &used, Remaining: &remaining, Unit: "credits", Window: "current-period"},
+			"codex_credit_percent_used": {Limit: &hundred, Used: &percent, Remaining: &remainingPercent, Unit: "%", Window: "current-period"},
+			"codex_credit_burn_rate":    {Used: &used, Unit: "credits/hour", Window: "observed"},
+			"codex_credit_runout_hours": {Used: &remaining, Unit: "h", Window: "at current rate"},
+		},
+		Resets: map[string]time.Time{"codex_credit_limit": resetAt},
+	}
+	if err := quotaIngestor.Ingest(context.Background(), map[string]core.UsageSnapshot{"codex-cli": good}); err != nil {
+		t.Fatalf("ingest good quota snapshot: %v", err)
+	}
+
+	latest := core.UsageSnapshot{
+		ProviderID: "codex",
+		AccountID:  "codex-cli",
+		Timestamp:  time.Now().UTC(),
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"session_total_tokens": {Used: &used, Unit: "tokens", Window: "session"},
+		},
+		Diagnostics: map[string]string{"quota_api_error": "temporary timeout"},
+	}
+	if err := quotaIngestor.Ingest(context.Background(), map[string]core.UsageSnapshot{"codex-cli": latest}); err != nil {
+		t.Fatalf("ingest partial quota snapshot: %v", err)
+	}
+
+	base := map[string]core.UsageSnapshot{
+		"codex-cli": {ProviderID: "codex", AccountID: "codex-cli", Status: core.StatusOK},
+	}
+	got, err := applyCanonicalTelemetryViewForTest(context.Background(), dbPath, base)
+	if err != nil {
+		t.Fatalf("apply canonical telemetry view: %v", err)
+	}
+
+	snap := got["codex-cli"]
+	restored := snap.Metrics["codex_credit_percent_used"]
+	if restored.Used == nil || *restored.Used != percent {
+		t.Fatalf("credit percentage = %+v, want last known %.4f", restored, percent)
+	}
+	if snap.Attributes["credit_quota_stale"] != "true" {
+		t.Fatalf("credit_quota_stale = %q, want true", snap.Attributes["credit_quota_stale"])
+	}
+	if snap.Diagnostics["credit_quota"] == "" {
+		t.Fatal("expected stale credit quota diagnostic")
+	}
+}
+
 func TestApplyCanonicalTelemetryView_UsesLatestSnapshotOnlyForRoot(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
 	store, err := OpenStore(dbPath)
