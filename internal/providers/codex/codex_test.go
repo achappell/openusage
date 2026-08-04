@@ -55,6 +55,9 @@ func TestDashboardWidgetCursorParityFlags(t *testing.T) {
 	if len(widget.CompactRows) < 5 {
 		t.Fatalf("expected >=5 compact rows, got %d", len(widget.CompactRows))
 	}
+	if len(widget.GaugePriority) == 0 || widget.GaugePriority[0] != "codex_credit_percent_used" {
+		t.Fatalf("expected credit percentage to be the primary gauge, got %#v", widget.GaugePriority)
+	}
 }
 
 func TestFetchWithSessionData(t *testing.T) {
@@ -317,6 +320,28 @@ func TestHasChangedDetectsNestedSessionFileUpdates(t *testing.T) {
 	}
 	if !changed {
 		t.Fatal("expected HasChanged to detect newer nested session file")
+	}
+}
+
+func TestHasChangedPollsAuthenticatedRemoteQuota(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "auth.json"), []byte(`{"tokens":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := New()
+	changed, err := p.HasChanged(core.AccountConfig{
+		ID:       "codex-test",
+		Provider: "codex",
+		RuntimeHints: map[string]string{
+			"config_dir": tmpDir,
+		},
+	}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("HasChanged() error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected authenticated Codex account to poll remote quota")
 	}
 }
 
@@ -746,17 +771,24 @@ func TestClassifyClient_NormalizesCodexWrapperSources(t *testing.T) {
 func TestFetchExtractsToolLanguageAndCodeStats(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsRoot := filepath.Join(tmpDir, "sessions")
+	// The provider buckets events by the day encoded in their timestamp and
+	// compares that against time.Now().UTC() for requests_today, so the
+	// fixture must live on the real current UTC day. Anchor the day directory
+	// and every event timestamp to the start of that day: derived from a
+	// single instant they can never straddle midnight the way now-relative
+	// offsets did.
 	now := time.Now().UTC()
-	dayDir := filepath.Join(sessionsRoot, now.Format("2006"), now.Format("01"), now.Format("02"))
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	dayDir := filepath.Join(sessionsRoot, dayStart.Format("2006"), dayStart.Format("01"), dayStart.Format("02"))
 	if err := os.MkdirAll(dayDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
 	sessionFile := filepath.Join(dayDir, "rollout-rich.jsonl")
-	ts1 := now.Add(-2 * time.Minute).Format(time.RFC3339)
-	ts2 := now.Add(-90 * time.Second).Format(time.RFC3339)
-	ts3 := now.Add(-60 * time.Second).Format(time.RFC3339)
-	ts4 := now.Add(-30 * time.Second).Format(time.RFC3339)
+	ts1 := dayStart.Add(1 * time.Second).Format(time.RFC3339)
+	ts2 := dayStart.Add(2 * time.Second).Format(time.RFC3339)
+	ts3 := dayStart.Add(3 * time.Second).Format(time.RFC3339)
+	ts4 := dayStart.Add(4 * time.Second).Format(time.RFC3339)
 	sessionContent := fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"sess-rich","source":"cli","originator":"codex_cli_rs"}}
 {"timestamp":"%s","type":"turn_context","payload":{"model":"gpt-5-codex"}}
 {"timestamp":"%s","type":"event_msg","payload":{"type":"user_message","text":"first"}}
