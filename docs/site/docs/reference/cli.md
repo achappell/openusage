@@ -17,6 +17,7 @@ openusage daily|weekly|monthly [flags]          # headless usage/cost report by 
 openusage session [flags]                        # usage/cost grouped by Claude Code session
 openusage blocks [flags]                          # usage by 5-hour billing block + burn rate
 openusage statusline [flags]                     # one-line status bar for Claude Code
+openusage active [--json|--explain]               # active provider and quota facts
 openusage tmux [subcommand] [flags]              # tmux status bar integration
 openusage telemetry hook <source> [flags]       # forward an event from a tool hook
 openusage telemetry daemon <subcommand> [flags] # daemon lifecycle

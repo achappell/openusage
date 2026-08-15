@@ -121,6 +121,7 @@ const sidebars: SidebarsConfig = {
       link: {type: 'generated-index', slug: '/reference'},
       items: [
         'reference/cli',
+        'reference/active-provider',
         'reference/configuration',
         'reference/env-vars',
         'reference/paths',
