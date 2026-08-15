@@ -44,6 +44,21 @@ func startFakeZen(t *testing.T, status int, body string) *httptest.Server {
 	}))
 }
 
+// stubNoStoredSession makes the console-enrichment seam hermetic for tests
+// that only exercise the Zen API path. Without it, Fetch falls through to the
+// real ~/.config/openusage/credentials.json and, on a developer machine that
+// has an "opencode" browser session stored, contacts the live OpenCode console
+// — flipping auth_scope to "zen+console" and making these tests pass on CI but
+// fail locally. Tests that exercise enrichment stub this var themselves.
+func stubNoStoredSession(t *testing.T) {
+	t.Helper()
+	orig := loadStoredSession
+	t.Cleanup(func() { loadStoredSession = orig })
+	loadStoredSession = func(string) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{}, false, nil
+	}
+}
+
 func newAcct(t *testing.T, baseURL string) core.AccountConfig {
 	t.Helper()
 	t.Setenv("TEST_OPENCODE_KEY", "sk-zen-test-1234567890")
@@ -56,6 +71,8 @@ func newAcct(t *testing.T, baseURL string) core.AccountConfig {
 }
 
 func TestFetch_Success_AuthOKExposesModels(t *testing.T) {
+	stubNoStoredSession(t)
+
 	server := startFakeZen(t, http.StatusOK, zenModelsBody())
 	defer server.Close()
 
@@ -81,6 +98,8 @@ func TestFetch_Success_AuthOKExposesModels(t *testing.T) {
 }
 
 func TestFetch_AuthRequired_NoKey(t *testing.T) {
+	stubNoStoredSession(t)
+
 	acct := core.AccountConfig{
 		ID:        "opencode",
 		Provider:  "opencode",
@@ -96,6 +115,8 @@ func TestFetch_AuthRequired_NoKey(t *testing.T) {
 }
 
 func TestFetch_AuthFailed_401(t *testing.T) {
+	stubNoStoredSession(t)
+
 	server := startFakeZen(t, http.StatusUnauthorized, `{"error":"unauthorized"}`)
 	defer server.Close()
 
@@ -112,6 +133,8 @@ func TestFetch_AuthFailed_401(t *testing.T) {
 }
 
 func TestFetch_RateLimited_429(t *testing.T) {
+	stubNoStoredSession(t)
+
 	server := startFakeZen(t, http.StatusTooManyRequests, `{}`)
 	defer server.Close()
 
