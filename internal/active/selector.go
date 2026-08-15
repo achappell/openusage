@@ -1,6 +1,10 @@
 package active
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/janekbaraniewski/openusage/internal/core"
+)
 
 // SelectInput is everything the ranking needs. Candidates carry their own
 // LastEventAt so the selector stays free of storage concerns and is easy to
@@ -18,12 +22,14 @@ type SelectInput struct {
 // ("pinned", "events", or "local"), and whether anything matched.
 func Select(in SelectInput) (Candidate, string, bool) {
 	if len(in.Candidates) == 0 {
+		core.Tracef("[active] winner=none source=none candidates=0 with_events=0")
 		return Candidate{}, "", false
 	}
 
 	if in.PinnedKey != "" {
 		for _, c := range in.Candidates {
 			if c.Key == in.PinnedKey {
+				core.Tracef("[active] winner=%s source=pinned candidates=%d with_events=0", c.Key, len(in.Candidates))
 				return c, "pinned", true
 			}
 		}
@@ -39,6 +45,8 @@ func Select(in SelectInput) (Candidate, string, bool) {
 		sort.SliceStable(withEvents, func(i, j int) bool {
 			return withEvents[i].LastEventAt.After(*withEvents[j].LastEventAt)
 		})
+		core.Tracef("[active] winner=%s source=events candidates=%d with_events=%d",
+			withEvents[0].Key, len(in.Candidates), len(withEvents))
 		return withEvents[0], "events", true
 	}
 
@@ -62,7 +70,10 @@ func Select(in SelectInput) (Candidate, string, bool) {
 		}
 	}
 	if best < 0 {
+		core.Tracef("[active] winner=none source=none candidates=%d with_events=0", len(in.Candidates))
 		return Candidate{}, "", false
 	}
+	core.Tracef("[active] winner=%s source=local candidates=%d with_events=0",
+		in.Candidates[best].Key, len(in.Candidates))
 	return in.Candidates[best], "local", true
 }
