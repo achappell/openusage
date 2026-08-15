@@ -43,6 +43,7 @@ func main() {
 		},
 	})
 	root.AddCommand(newTelemetryCommand())
+	root.AddCommand(newActiveCommand())
 	root.AddCommand(newIntegrationsCommand())
 	root.AddCommand(newDetectCommand())
 	root.AddCommand(newPricingCommand())
