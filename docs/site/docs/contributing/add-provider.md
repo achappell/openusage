@@ -58,6 +58,11 @@ Implement `Fetch(ctx, acct)`:
 - Wrap errors as `fmt.Errorf("<id>: <what>: %w", err)`.
 - Parse the response into a `UsageSnapshot`.
 - For shared rate-limit header formats, reuse helpers from `internal/parsers/`.
+- For a quota forecast, emit `Metric{Used, Limit, Unit, Window}` plus a reset in
+  `snap.Resets[metricKey]` or `snap.Resets[metricKey+"_reset"]`. Normalization
+  automatically adds the shared `quota_burn_rate` and `quota_runout_hours`
+  metrics when the period start can be derived from the window or a
+  `billing_cycle_start` raw value. Do not add provider-specific overlay code.
 
 ### Phase 5: Widget design
 

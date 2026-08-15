@@ -99,6 +99,7 @@ price differently, so a total alone cannot be converted to spend.
 
 - Source: `rate_limit.primary` and `rate_limit.secondary` from the live usage endpoint. Each carries `used_percent`, `window_minutes`, `resets_at` (Unix seconds).
 - Transform: `Used = used_percent`, `Limit = 100`. `Resets[…]` is set from `resets_at`. `Window` is `<minutes>m`. Each window is also exposed via a direct alias for the dashboard widget: `plan_auto_percent_used` aliases `rate_limit_primary`, `plan_api_percent_used` aliases `rate_limit_secondary`. A separate `plan_percent_used` metric reflects the greater of the two.
+- Shared forecast: snapshot normalization also emits `quota_burn_rate` and `quota_runout_hours` from the most restrictive valid quota window. These are provider-neutral metrics used by status surfaces such as the dynamic menu-bar overlay.
 
 ### Credit balance
 
@@ -112,6 +113,7 @@ price differently, so a total alone cannot be converted to spend.
 - Personal cap: when `credit_limit_override` is lower than the reported quota, `codex_credit_limit` becomes the effective advisory limit and `codex_credit_reported_limit` retains the authoritative quota. Usage remains the authoritative cumulative amount.
 - Forecast: when the next monthly reset is available, OpenUsage infers the preceding calendar-month boundary and calculates the average burn rate from cumulative current-period usage divided by elapsed time since that boundary. The dashboard shows the reset countdown and projected percentage at reset. Without a usable reset timestamp, it falls back to successive observed quota samples.
 - Forecast source is recorded as `inferred_period_start` or `observed_usage` so the estimate is distinguishable from authoritative quota data.
+- The forecast is an estimate at the current average pace. The reset timestamp and reset countdown are authoritative; if the projected exhaustion falls after reset, surfaces should report that it will not exhaust before the reset rather than presenting a misleading exhaustion time.
 
 ### Plan, version, account email
 

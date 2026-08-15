@@ -71,6 +71,10 @@ New extraction paths emit:
    - `codex_credit_percent_used` for the used percentage.
    - `codex_credit_burn_rate` and `codex_credit_runout_hours` derived from successive CLI quota observations.
 
+10. Provider-neutral quota forecast:
+    - `quota_burn_rate` and `quota_runout_hours` are added during snapshot normalization whenever a provider reports a finite quota, a parseable period (or explicit period start), and a future reset.
+    - `quota_forecast_metric`, `quota_forecast_period_start`, and `quota_forecast_reset_at` identify the source window so integrations do not need Codex-specific keys.
+
 ### 4.2 Cursor-Compatibility Aliases
 
 `applyCursorCompatibilityMetrics` adds alias behavior so Codex fits existing compact rows and gauge logic:
