@@ -1,0 +1,53 @@
+// Package active resolves which AI provider the user is currently working
+// with, and narrates that provider's quota position.
+//
+// Selection prefers firsthand telemetry events. When the daemon is
+// unavailable, callers can fall back to local-file mtime detection.
+package active
+
+import "time"
+
+// Severity is the traffic-light band a consumer paints with.
+type Severity string
+
+const (
+	SeverityGood    Severity = "good"
+	SeverityWarn    Severity = "warn"
+	SeverityBad     Severity = "bad"
+	SeverityUnknown Severity = "unknown"
+)
+
+// Facts are the structured quota numbers behind a rendered label.
+type Facts struct {
+	AtCap             bool       `json:"at_cap,omitempty"`
+	PctUsed           *float64   `json:"pct_used,omitempty"`
+	PctRemaining      *float64   `json:"pct_remaining,omitempty"`
+	RunoutAt          *time.Time `json:"runout_at,omitempty"`
+	ResetAt           *time.Time `json:"reset_at,omitempty"`
+	RunoutBeforeReset bool       `json:"runout_before_reset,omitempty"`
+	ForecastSource    string     `json:"forecast_source,omitempty"`
+	RequestsToday     *float64   `json:"requests_today,omitempty"`
+}
+
+// Candidate is one selectable provider account.
+type Candidate struct {
+	Key         string     `json:"key"`
+	ProviderID  string     `json:"provider_id"`
+	AccountID   string     `json:"account_id"`
+	Display     string     `json:"display"`
+	LastEventAt *time.Time `json:"last_event_at,omitempty"`
+}
+
+// Selection is the answer to "which provider is active, and how is it doing".
+type Selection struct {
+	Selected string   `json:"selected"`
+	Display  string   `json:"display"`
+	Pinned   bool     `json:"pinned"`
+	Severity Severity `json:"severity"`
+	Label    string   `json:"label"`
+	Facts    Facts    `json:"facts,omitzero"`
+	// Source is "events", "local" (mtime fallback), or "pinned".
+	Source string `json:"source"`
+	// Status is "ok", "no_data", or "unavailable".
+	Status string `json:"status"`
+}
