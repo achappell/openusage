@@ -38,6 +38,19 @@ type ReadModelResponse struct {
 	Snapshots map[string]core.UsageSnapshot `json:"snapshots"`
 }
 
+// ActivePinRequest is the body of POST /v1/active/pin. An empty key clears
+// the current pin.
+type ActivePinRequest struct {
+	Key string `json:"key"`
+}
+
+// ActiveExplainResponse is the human-readable decision trace returned by
+// POST /v1/active/explain. The explanation is generated from the same
+// selector input as the normal active response.
+type ActiveExplainResponse struct {
+	Explanation string `json:"explanation"`
+}
+
 type HookResponse struct {
 	Source    string   `json:"source"`
 	Enqueued  int      `json:"enqueued"`

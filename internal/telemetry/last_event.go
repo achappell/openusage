@@ -15,6 +15,7 @@ func (s *Store) LastEventTimes(ctx context.Context) (map[string]time.Time, error
 		`SELECT provider_id, account_id, MAX(occurred_at)
 		   FROM usage_events
 		  WHERE provider_id IS NOT NULL AND provider_id != ''
+		    AND event_type IN ('turn_completed', 'message_usage', 'tool_usage')
 		  GROUP BY provider_id, account_id`)
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: querying last event times: %w", err)

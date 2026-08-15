@@ -25,7 +25,7 @@ func TestLastEventTimesGroupsByProviderAccount(t *testing.T) {
 			`INSERT INTO usage_events
 				(event_id, occurred_at, provider_id, agent_name, account_id,
 				 event_type, status, dedup_key, raw_event_id, normalization_version)
-			 VALUES (?, ?, ?, 'test', ?, 'message', 'ok', ?, 'raw-1', '1')`,
+			 VALUES (?, ?, ?, 'test', ?, 'message_usage', 'ok', ?, 'raw-1', '1')`,
 			id, occurred, provider, account, id)
 		if err != nil {
 			t.Fatalf("insert %s: %v", id, err)
@@ -35,6 +35,14 @@ func TestLastEventTimesGroupsByProviderAccount(t *testing.T) {
 	insert("e1", "codex", "default", "2026-08-15T10:00:00Z")
 	insert("e2", "codex", "default", "2026-08-15T12:00:00Z")
 	insert("e3", "claude_code", "default", "2026-08-15T11:00:00Z")
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO usage_events
+			(event_id, occurred_at, provider_id, agent_name, account_id,
+			 event_type, status, dedup_key, raw_event_id, normalization_version)
+		 VALUES ('limit-1', '2026-08-15T23:00:00Z', 'openai', 'test', 'default',
+			 'limit_snapshot', 'ok', 'limit-1', 'raw-1', '1')`); err != nil {
+		t.Fatalf("insert limit snapshot: %v", err)
+	}
 
 	got, err := store.LastEventTimes(ctx)
 	if err != nil {
