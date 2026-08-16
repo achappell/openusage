@@ -15,7 +15,7 @@ providers and (optionally) the same local history.
 | [CLI reports](#headless-cli-reports) | `openusage daily` (`--json`) | Scripting, CI, a quick check |
 | [Claude Code statusline](#claude-code-statusline) | `openusage statusline --install` | You live in Claude Code |
 | [tmux status bar](#tmux-status-bar) | `openusage tmux install` | You live in tmux |
-| [SketchyBar status bar](#sketchybar-status-bar) | `openusage sketchybar install` | You want provider usage in SketchyBar on macOS |
+| [SketchyBar status bar](#sketchybar-status-bar) | `openusage sketchybar install --write` | You want provider usage in SketchyBar on macOS |
 | [Background daemon](#always-on-background-daemon) | `openusage telemetry daemon install` | You want history over time |
 | [Multiple machines](#across-multiple-machines) | `openusage hub` / `hub-view` | You work across several machines |
 | [Export](#export--scripting) | `openusage export --json` | You want to pipe data into your own tools |

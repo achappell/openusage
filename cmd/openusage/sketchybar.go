@@ -39,8 +39,13 @@ With no subcommand, print the complete copy-pasteable managed block. Use
 	install := &cobra.Command{
 		Use:   "install",
 		Short: "Install the managed block and generated scripts",
+		Long: `Write the managed block into sketchybarrc and generate the scripts.
+
+Requires --write. Without it the block is printed so it can be reviewed
+before anything on disk is touched; sketchybarrc is a file people hand-edit,
+and an install subcommand should not rewrite it as a side effect of being
+run without arguments.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			opts.Write = true
 			_, err := sketchybar.Install(os.Stdout, opts)
 			return err
 		},
