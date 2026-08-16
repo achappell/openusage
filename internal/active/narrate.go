@@ -102,6 +102,10 @@ func severityFor(f Facts) Severity {
 	switch {
 	case *f.PctRemaining <= 10:
 		return SeverityBad
+	case f.RunoutAt != nil && f.RunoutBeforeReset:
+		// A forecasted exhaustion before the reset is actionable even when the
+		// instantaneous remaining percentage still looks healthy.
+		return SeverityWarn
 	case *f.PctRemaining <= 25:
 		return SeverityWarn
 	default:

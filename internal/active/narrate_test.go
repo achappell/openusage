@@ -44,7 +44,7 @@ func TestNarrateLabelGrammar(t *testing.T) {
 				RunoutBeforeReset: true,
 				PctRemaining:      pct(40),
 			},
-			wantLabel: "2d 0h/6d 21h", wantSeverity: SeverityGood,
+			wantLabel: "2d 0h/6d 21h", wantSeverity: SeverityWarn,
 		},
 		{
 			name: "at cap with reset",
@@ -61,7 +61,7 @@ func TestNarrateLabelGrammar(t *testing.T) {
 				RunoutBeforeReset: true,
 				PctRemaining:      pct(40),
 			},
-			wantLabel: "out ~2d 0h", wantSeverity: SeverityGood,
+			wantLabel: "out ~2d 0h", wantSeverity: SeverityWarn,
 		},
 		{
 			name: "no runout, quota and reset",

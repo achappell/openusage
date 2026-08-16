@@ -34,12 +34,25 @@ sketchybar --remove '/openusage.usage.row\..*/' >/dev/null 2>&1
 if [ -z "$payload" ] || ! printf '%s\n' "$payload" | jq -e 'type == "object"' >/dev/null 2>&1; then
   lines=$'provider\tAI unavailable'
 else
-  lines=$(printf '%s\n' "$payload" | jq -r '
-    [
-      ["provider", (.selection.display // "AI") + " " + (.selection.label // "quota unavailable")],
-      (if (.message // "") != "" then ["message", .message] else empty end),
-      (.rows[] | select((.display // "") != "") | [.name, .display])
-    ][] | @tsv
+  # Render only the rows the CLI marks primary, capped, so the popup stays a
+  # glanceable summary. Providers can report 60+ metrics; a bar popup is not a
+  # dashboard. Falls back to all rows when nothing is marked (older daemons).
+  # A non-numeric override would make --argjson fail and render an empty
+  # popup, so fall back to the default rather than trusting the environment.
+  max_rows="${OPENUSAGE_SKETCHYBAR_MAX_ROWS:-8}"
+  case "$max_rows" in
+    ''|*[!0-9]*) max_rows=8 ;;
+  esac
+  lines=$(printf '%s\n' "$payload" | jq -r --argjson max "$max_rows" '
+    (.rows // []) as $all
+    | ([$all[] | select(.primary == true)]) as $primary
+    | (if ($primary | length) > 0 then $primary else $all end) as $chosen
+    | ([
+        ["provider", (.selection.display // "AI") + " " + (.selection.label // "quota unavailable")],
+        (if (.message // "") != "" then ["message", .message] else empty end)
+      ]) as $header
+    | $header + ([$chosen[] | select((.display // "") != "") | [.name, .display]] | .[:$max])
+    | .[] | @tsv
   ')
 fi
 

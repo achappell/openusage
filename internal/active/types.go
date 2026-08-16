@@ -35,6 +35,7 @@ type Candidate struct {
 	ProviderID  string     `json:"provider_id"`
 	AccountID   string     `json:"account_id"`
 	Display     string     `json:"display"`
+	Severity    Severity   `json:"severity,omitempty"`
 	LastEventAt *time.Time `json:"last_event_at,omitempty"`
 }
 
@@ -53,7 +54,8 @@ type Selection struct {
 }
 
 // CandidateList is the selector's current candidate set. It is intentionally
-// small: status-bar consumers need stable keys and event evidence, not full
+// small: status-bar consumers need stable keys, event evidence, and the same
+// compact severity band used by the active-provider response, not full
 // provider snapshots.
 type CandidateList struct {
 	Selected   string      `json:"selected,omitempty"`
@@ -76,8 +78,11 @@ type DetailResponse struct {
 // provider metadata is deliberately absent; this endpoint is suitable for
 // shell integrations and should not become a credentials/debug dump.
 type DetailRow struct {
-	Name      string     `json:"name"`
-	Display   string     `json:"display"`
+	Name    string `json:"name"`
+	Display string `json:"display"`
+	// Primary marks the small set of rows a compact consumer (status bar
+	// popup) should render. Consumers that want everything ignore it.
+	Primary   bool       `json:"primary,omitempty"`
 	Limit     *float64   `json:"limit,omitempty"`
 	Remaining *float64   `json:"remaining,omitempty"`
 	Used      *float64   `json:"used,omitempty"`

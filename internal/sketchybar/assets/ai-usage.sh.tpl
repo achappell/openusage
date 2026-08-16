@@ -12,8 +12,17 @@ file_mtime() {
   stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0\n'
 }
 
-valid_active() {
-  jq -e 'type == "object" and (.status | type == "string")' "$1" >/dev/null 2>&1
+# Loose: the payload is shaped like an active response. Enough to paint from,
+# whatever its status. Used only when the CLI could not be reached at all --
+# a stale reading beats "AI unavailable".
+parsable_active() {
+  jq -e 'type == "object" and (.status | type == "string")' >/dev/null 2>&1
+}
+
+# Strict: the payload actually carries a quota reading. Only these are worth
+# caching, and only these may displace a cached quota-bearing snapshot.
+quota_bearing() {
+  jq -e 'type == "object" and .status == "ok" and (.label // "") != "quota unavailable"' >/dev/null 2>&1
 }
 
 paint() {
@@ -26,10 +35,17 @@ paint() {
 
 case "${SENDER:-}" in
   mouse.entered)
+    # A mouse-enter event can be dispatched with the event target in NAME.
+    # Never let a neighbouring item (the provider switcher) open this popup.
+    if [ "${NAME:-ai}" != "ai" ]; then
+      sketchybar --set ai popup.drawing=off >/dev/null 2>&1
+      exit 0
+    fi
     exec "$SCRIPT_DIR/usage-popup.sh"
     ;;
   mouse.exited|mouse.exited.global)
-    sketchybar --set "${NAME:-ai}" popup.drawing=off
+    # Close the owning popup explicitly; NAME may describe the event target.
+    sketchybar --set ai popup.drawing=off
     sketchybar --set ai_switcher popup.drawing=off >/dev/null 2>&1
     exit 0
     ;;
@@ -37,15 +53,27 @@ esac
 
 mkdir -p "$CACHE_DIR" 2>/dev/null
 payload=""
-if payload=$("$OPENUSAGE_BIN" active --json 2>/dev/null) &&
-   printf '%s\n' "$payload" | jq -e 'type == "object" and (.status | type == "string")' >/dev/null 2>&1; then
-  tmp=$(mktemp "$CACHE_DIR/active.XXXXXX" 2>/dev/null) || tmp=""
-  if [ -n "$tmp" ]; then
-    printf '%s\n' "$payload" >"$tmp" && mv -f "$tmp" "$ACTIVE_CACHE"
+fresh_payload=""
+if fresh_payload=$("$OPENUSAGE_BIN" active --json 2>/dev/null) &&
+   printf '%s\n' "$fresh_payload" | parsable_active; then
+  # Local recency fallback can be valid JSON but have no quota. Do not let
+  # that degraded answer overwrite the last live, quota-bearing snapshot.
+  if printf '%s\n' "$fresh_payload" | quota_bearing; then
+    payload="$fresh_payload"
+    tmp=$(mktemp "$CACHE_DIR/active.XXXXXX" 2>/dev/null) || tmp=""
+    if [ -n "$tmp" ]; then
+      printf '%s\n' "$payload" >"$tmp" && mv -f "$tmp" "$ACTIVE_CACHE"
+    fi
+  elif [ -f "$ACTIVE_CACHE" ] && quota_bearing <"$ACTIVE_CACHE"; then
+    payload=$(<"$ACTIVE_CACHE")
+  else
+    payload="$fresh_payload"
   fi
 fi
 
-if [ -z "$payload" ] && [ -f "$ACTIVE_CACHE" ] && valid_active "$ACTIVE_CACHE"; then
+# The CLI could not be reached. Any parsable cached snapshot beats painting
+# "AI unavailable", so this fallback stays deliberately loose.
+if [ -z "$payload" ] && [ -f "$ACTIVE_CACHE" ] && parsable_active <"$ACTIVE_CACHE"; then
   payload=$(<"$ACTIVE_CACHE")
 fi
 

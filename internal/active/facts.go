@@ -10,10 +10,13 @@ import (
 var quotaMetricNames = map[string][]string{
 	"antigravity": {"quota"},
 	"claude_code": {"usage_five_hour", "usage_seven_day", "rate_limit_primary"},
-	"codex":       {"plan_percent_used", "rate_limit_primary"},
-	"cursor":      {"plan_percent_used"},
-	"gemini_cli":  {"quota"},
-	"opencode":    {"monthly_usage_pct", "weekly_usage", "usage_five_hour"},
+	// Prefer the native rate-limit metric because it carries the authoritative
+	// reset entry. plan_percent_used is a compatibility alias and may not carry
+	// that relationship in older snapshots.
+	"codex":      {"rate_limit_primary", "plan_percent_used"},
+	"cursor":     {"plan_percent_used"},
+	"gemini_cli": {"quota"},
+	"opencode":   {"monthly_usage_pct", "weekly_usage", "usage_five_hour"},
 }
 
 var defaultQuotaMetricNames = []string{"plan_percent_used", "rate_limit_primary", "quota"}
@@ -25,6 +28,20 @@ func BuildFacts(snap core.UsageSnapshot, now time.Time) Facts {
 	names := quotaMetricNames[snap.ProviderID]
 	if len(names) == 0 {
 		names = defaultQuotaMetricNames
+	}
+	// Quota forecasts are calculated against the window that will run out
+	// first. Prefer that same metric so its reset belongs to the forecast we
+	// are narrating, rather than pairing (for example) a rolling runout with
+	// a monthly reset.
+	if forecastMetric := strings.TrimSpace(snap.Attributes["quota_forecast_metric"]); forecastMetric != "" {
+		ordered := make([]string, 0, len(names)+1)
+		ordered = append(ordered, forecastMetric)
+		for _, name := range names {
+			if name != forecastMetric {
+				ordered = append(ordered, name)
+			}
+		}
+		names = ordered
 	}
 	for _, name := range names {
 		metric, ok := snap.Metrics[name]

@@ -27,6 +27,57 @@ func TestBuildFactsUsesExplicitResetKey(t *testing.T) {
 	}
 }
 
+func TestBuildFactsPrefersCodexRateLimitReset(t *testing.T) {
+	used := 16.0
+	limit := 100.0
+	reset := at("2026-08-22T19:10:00Z")
+	snap := core.NewUsageSnapshot("codex", "codex-cli")
+	snap.Metrics["rate_limit_primary"] = core.Metric{
+		Used: &used, Limit: &limit, Unit: "%", Window: "7d",
+	}
+	snap.Metrics["plan_percent_used"] = core.Metric{
+		Used: &used, Limit: &limit, Unit: "%", Window: "7d",
+	}
+	snap.Resets["rate_limit_primary"] = reset
+
+	facts := BuildFacts(snap, time.Date(2026, 8, 16, 16, 0, 0, 0, time.UTC))
+	if facts.ResetAt == nil || !facts.ResetAt.Equal(reset) {
+		t.Fatalf("ResetAt = %v, want %v", facts.ResetAt, reset)
+	}
+}
+
+func TestBuildFactsUsesQuotaForecastMetric(t *testing.T) {
+	monthlyUsed := 80.0
+	rollingUsed := 10.0
+	runoutHours := 2.0
+	monthlyReset := at("2026-08-20T12:00:00Z")
+	rollingReset := at("2026-08-16T13:00:00Z")
+	snap := core.NewUsageSnapshot("opencode", "default")
+	snap.Metrics["monthly_usage_pct"] = core.Metric{
+		Used: &monthlyUsed, Limit: core.Float64Ptr(100), Unit: "percent",
+		Window: "month", ResetKey: "monthly_usage_pct_reset",
+	}
+	snap.Metrics["rolling_usage"] = core.Metric{
+		Used: &rollingUsed, Limit: core.Float64Ptr(100), Unit: "percent",
+		Window: "rolling-5h", ResetKey: "rolling_usage_reset",
+	}
+	snap.Metrics["quota_runout_hours"] = core.Metric{Used: &runoutHours, Unit: "hours"}
+	snap.SetAttribute("quota_forecast_metric", "rolling_usage")
+	snap.Resets["monthly_usage_pct_reset"] = monthlyReset
+	snap.Resets["rolling_usage_reset"] = rollingReset
+
+	facts := BuildFacts(snap, time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC))
+	if facts.PctRemaining == nil || *facts.PctRemaining != 90 {
+		t.Fatalf("PctRemaining = %v, want 90", facts.PctRemaining)
+	}
+	if facts.ResetAt == nil || !facts.ResetAt.Equal(rollingReset) {
+		t.Fatalf("ResetAt = %v, want %v", facts.ResetAt, rollingReset)
+	}
+	if facts.RunoutBeforeReset {
+		t.Fatal("RunoutBeforeReset = true, want false when runout follows the forecast window reset")
+	}
+}
+
 func TestBuildFactsIgnoresNonQuotaCounters(t *testing.T) {
 	used := 1204.0
 	snap := core.NewUsageSnapshot("opencode", "default")

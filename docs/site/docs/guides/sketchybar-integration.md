@@ -73,31 +73,57 @@ leave them in place so future installs can replace the block safely.
 ```bash
 # >>> openusage sketchybar >>> (managed; do not edit between sentinels)
 # Generated scripts live outside ~/.config/sketchybar/plugins.
-OPENUSAGE_SKETCHYBAR_DIR="$HOME/.local/share/openusage/sketchybar"
-OPENUSAGE_BIN="openusage"
+OPENUSAGE_SKETCHYBAR_DIR='$HOME/.local/share/openusage/sketchybar'
+OPENUSAGE_BIN='openusage'
 OPENUSAGE_SKETCHYBAR_CACHE_DIR="${OPENUSAGE_SKETCHYBAR_CACHE_DIR:-$HOME/.cache/openusage/sketchybar}"
-OPENUSAGE_SKETCHYBAR_ICON="󰚩"
-OPENUSAGE_SKETCHYBAR_GOOD_COLOR="0xffa6da95"
-OPENUSAGE_SKETCHYBAR_WARN_COLOR="0xffeed49f"
-OPENUSAGE_SKETCHYBAR_BAD_COLOR="0xffed8796"
-OPENUSAGE_SKETCHYBAR_UNKNOWN_COLOR="0xffcad3f5"
-OPENUSAGE_SKETCHYBAR_TEXT_COLOR="0xffcad3f5"
+OPENUSAGE_SKETCHYBAR_ICON='󰚩'
+OPENUSAGE_SKETCHYBAR_GOOD_COLOR='0xffa6da95'
+OPENUSAGE_SKETCHYBAR_WARN_COLOR='0xffeed49f'
+OPENUSAGE_SKETCHYBAR_BAD_COLOR='0xffed8796'
+OPENUSAGE_SKETCHYBAR_UNKNOWN_COLOR='0xffcad3f5'
+OPENUSAGE_SKETCHYBAR_TEXT_COLOR='0xffcad3f5'
 export OPENUSAGE_SKETCHYBAR_DIR OPENUSAGE_BIN OPENUSAGE_SKETCHYBAR_CACHE_DIR
 export OPENUSAGE_SKETCHYBAR_ICON OPENUSAGE_SKETCHYBAR_GOOD_COLOR OPENUSAGE_SKETCHYBAR_WARN_COLOR OPENUSAGE_SKETCHYBAR_BAD_COLOR OPENUSAGE_SKETCHYBAR_UNKNOWN_COLOR OPENUSAGE_SKETCHYBAR_TEXT_COLOR
-sketchybar --add item ai right >/dev/null 2>&1 || true
-sketchybar --subscribe ai mouse.entered mouse.exited mouse.exited.global
-sketchybar --set ai update_freq=60 padding_left=10 popup.background.color="0xff1e2030" popup.background.border_color="0xff494d64" popup.background.border_width=2 popup.background.corner_radius=6 popup.align=right popup.y_offset=2 script="$OPENUSAGE_SKETCHYBAR_DIR/ai-usage.sh"
-sketchybar --add item ai_switcher right >/dev/null 2>&1 || true
-sketchybar --subscribe ai_switcher mouse.entered
-sketchybar --set ai_switcher padding_left=2 padding_right=2 icon="⇄" icon.font="Hack Nerd Font:Regular:13.0" icon.color="0xffcad3f5" label.drawing=off popup.background.color="0xff1e2030" popup.background.border_color="0xff494d64" popup.background.border_width=2 popup.background.corner_radius=6 popup.horizontal=on popup.align=right popup.y_offset=2 script="$OPENUSAGE_SKETCHYBAR_DIR/provider-select.sh"
+sketchybar --add item 'ai' 'right' >/dev/null 2>&1 || true
+sketchybar --subscribe 'ai' mouse.entered mouse.exited mouse.exited.global
+sketchybar --set 'ai' update_freq=60 padding_left=10 popup.background.color='0xff1e2030' popup.background.border_color='0xff494d64' popup.background.border_width=2 popup.background.corner_radius=6 popup.align=right popup.y_offset=2 script="$OPENUSAGE_SKETCHYBAR_DIR/ai-usage.sh"
+sketchybar --add item 'ai_switcher' 'right' >/dev/null 2>&1 || true
+sketchybar --subscribe 'ai_switcher' mouse.clicked
+sketchybar --set 'ai_switcher' padding_left=2 padding_right=2 icon='⇄' icon.font="Hack Nerd Font:Regular:13.0" icon.color='0xffcad3f5' label.drawing=off popup.drawing=off popup.background.color='0xff1e2030' popup.background.border_color='0xff494d64' popup.background.border_width=2 popup.background.corner_radius=6 popup.horizontal=on popup.align=right popup.y_offset=2 script="$OPENUSAGE_SKETCHYBAR_DIR/provider-select.sh"
 sketchybar --update
 # <<< openusage sketchybar <<<
 ```
 
-The generated `ai-usage.sh` script opens the detail popup on hover. The
-switcher script uses the stable `provider:account` key from
+The two items use different gestures on purpose. The `ai` item opens its
+detail popup on **hover** (`mouse.entered`), while the `ai_switcher` item opens
+the provider picker on **click** (`mouse.clicked`) and closes it on a second
+click — a menu you are choosing from should not vanish when the pointer drifts.
+
+The switcher script uses the stable `provider:account` key from
 `openusage active list --json`, so account labels and display text are never
 parsed back into selection state.
+
+:::note Upgrading from a hover-driven switcher
+
+Earlier versions subscribed `ai_switcher` to `mouse.entered`. The picker now
+ignores anything other than `mouse.clicked`, so an old managed block leaves the
+switcher unresponsive. Re-run the installer to replace it:
+
+```bash
+openusage sketchybar install --write
+sketchybar --reload
+```
+
+:::
+
+### Tuning the detail popup
+
+The popup renders only the rows the CLI marks as primary, capped so it stays
+glanceable rather than becoming a dashboard.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `OPENUSAGE_SKETCHYBAR_MAX_ROWS` | `8` | Maximum metric rows in the detail popup, excluding the provider and message header rows. Non-numeric values fall back to the default. |
 
 ## Presets
 

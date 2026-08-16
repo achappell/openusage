@@ -37,6 +37,7 @@ func TestBuildSnippetUsesNeutralAssetDirectory(t *testing.T) {
 		"OPENUSAGE_SKETCHYBAR_DIR='/tmp/openusage sketchybar'",
 		"ai-usage.sh",
 		"provider-select.sh",
+		"--subscribe 'ai_switcher' mouse.clicked",
 	} {
 		if !strings.Contains(snippet, want) {
 			t.Fatalf("snippet missing %q:\n%s", want, snippet)
@@ -99,6 +100,26 @@ func TestInstallWritesAssetsAndSentinel(t *testing.T) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read asset %s: %v", name, err)
+		}
+		if name == "ai-usage.sh" {
+			// The cache fallbacks use two deliberately different predicates.
+			// Collapsing them into one made a total CLI failure paint
+			// "AI unavailable" instead of the last known reading, because the
+			// strict quota check also gated the unreachable-CLI fallback.
+			if !strings.Contains(string(data), `parsable_active <"$ACTIVE_CACHE"`) {
+				t.Fatalf("asset %s: unreachable-CLI fallback must use the loose predicate", name)
+			}
+			if !strings.Contains(string(data), `quota_bearing <"$ACTIVE_CACHE"`) {
+				t.Fatalf("asset %s: degraded-payload fallback must use the strict predicate", name)
+			}
+			for _, want := range []string{
+				`if [ "${NAME:-ai}" != "ai" ]; then`,
+				"sketchybar --set ai popup.drawing=off",
+			} {
+				if !strings.Contains(string(data), want) {
+					t.Fatalf("asset %s missing hover isolation %q", name, want)
+				}
+			}
 		}
 		if strings.Contains(strings.ToLower(string(data)), "python") {
 			t.Fatalf("asset %s reintroduced a Python dependency", name)

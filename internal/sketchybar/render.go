@@ -59,8 +59,8 @@ func BuildSnippet(opts InstallOptions) (string, error) {
 		item, preset.UpdateFreq, shellQuote(preset.Colors.Bar), shellQuote(preset.Colors.Surface))
 
 	fmt.Fprintf(&b, "sketchybar --add item %s %s >/dev/null 2>&1 || true\n", switcher, position)
-	fmt.Fprintf(&b, "sketchybar --subscribe %s mouse.entered\n", switcher)
-	fmt.Fprintf(&b, "sketchybar --set %s padding_left=2 padding_right=2 icon=%s icon.font=\"Hack Nerd Font:Regular:13.0\" icon.color=%s label.drawing=off popup.background.color=%s popup.background.border_color=%s popup.background.border_width=2 popup.background.corner_radius=6 popup.horizontal=on popup.align=right popup.y_offset=2 script=\"$OPENUSAGE_SKETCHYBAR_DIR/provider-select.sh\"\n",
+	fmt.Fprintf(&b, "sketchybar --subscribe %s mouse.clicked\n", switcher)
+	fmt.Fprintf(&b, "sketchybar --set %s padding_left=2 padding_right=2 icon=%s icon.font=\"Hack Nerd Font:Regular:13.0\" icon.color=%s label.drawing=off popup.drawing=off popup.background.color=%s popup.background.border_color=%s popup.background.border_width=2 popup.background.corner_radius=6 popup.horizontal=on popup.align=right popup.y_offset=2 script=\"$OPENUSAGE_SKETCHYBAR_DIR/provider-select.sh\"\n",
 		switcher, shellQuote(preset.SwitcherIcon), shellQuote(preset.Colors.Text), shellQuote(preset.Colors.Bar), shellQuote(preset.Colors.Surface))
 	b.WriteString("sketchybar --update\n")
 	b.WriteString(SentinelEnd)

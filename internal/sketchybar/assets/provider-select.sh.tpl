@@ -7,6 +7,19 @@ CACHE_DIR="${OPENUSAGE_SKETCHYBAR_CACHE_DIR:-$HOME/.cache/openusage/sketchybar}"
 LIST_CACHE="$CACHE_DIR/list.json"
 SWITCHER="${NAME:-ai_switcher}"
 
+if [ -z "${1:-}" ]; then
+  # The picker is deliberately click-driven. Ignore a stale hover
+  # subscription from an older install and never resurrect a dismissed menu.
+  if [ "${SENDER:-}" != "mouse.clicked" ]; then
+    exit 0
+  fi
+  popup_state=$(sketchybar --query "$SWITCHER" 2>/dev/null | jq -r '.popup.drawing // "off"')
+  if [ "$popup_state" = "on" ]; then
+    sketchybar --set "$SWITCHER" popup.drawing=off >/dev/null 2>&1
+    exit 0
+  fi
+fi
+
 if [ "${1:-}" = "--auto" ]; then
   "$OPENUSAGE_BIN" active unpin >/dev/null 2>&1 || exit 1
 elif [ -n "${1:-}" ]; then
@@ -15,6 +28,8 @@ fi
 
 if [ -n "${1:-}" ]; then
   NAME=ai SENDER=forced "$SCRIPT_DIR/ai-usage.sh" >/dev/null 2>&1
+  sketchybar --set "$SWITCHER" popup.drawing=off >/dev/null 2>&1
+  exit 0
 fi
 
 mkdir -p "$CACHE_DIR" 2>/dev/null
@@ -45,33 +60,60 @@ else
   auto_selected=0
   [ -z "$pinned" ] && auto_selected=1
   rows=$(printf '%s\n' "$payload" | jq -r --arg selected "$selected" --arg pinned "$pinned" --argjson auto_selected "$auto_selected" '
+    .candidates as $candidates |
+    ($candidates
+      | map(.provider_id // "")
+      | group_by(.)
+      | map({key: .[0], value: length})
+      | from_entries) as $provider_counts |
     [["--auto", "Auto", (if $auto_selected == 1 then "1" else "0" end), "0"]] +
-    [ .candidates[] |
+    [ $candidates[] |
+      (.provider_id // "") as $provider |
+      (.display // $provider) as $display |
+      (.account_id // "default") as $account |
+      (.severity // "unknown") as $severity |
+      ($provider_counts[$provider] // 1) as $provider_count |
+      (if $provider_count < 2 or $account == "default" or $account == $provider then
+         $display
+       elif ($account | startswith($provider + "-")) then
+         ($account | split("-") | .[1:] | join("-")) as $suffix |
+         (if $suffix == "" or $suffix == "default" then $display else ($display + " · " + $suffix) end)
+       else
+         ($display + " · " + $account)
+       end) as $label |
       [
         .key,
-        (if (.account_id // "default") == "default" then (.display // .provider_id) else ((.display // .provider_id) + " · " + .account_id) end),
+        $label,
         (if .key == $selected then "1" else "0" end),
-        (if .key == $pinned then "1" else "0" end)
+        (if .key == $pinned then "1" else "0" end),
+        $severity
       ]
     ] | .[] | @tsv
   ')
   index=0
-  while IFS=$'\t' read -r key label selected_row pinned_row; do
+  while IFS=$'\t' read -r key label selected_row pinned_row severity; do
     [ -z "$key" ] && continue
     if [ "$key" = "--auto" ]; then
       click_script="$select_path --auto"
       icon="↻"
+      indicator_color="${OPENUSAGE_SKETCHYBAR_TEXT_COLOR:-0xffcad3f5}"
     else
       printf -v quoted_key '%q' "$key"
       click_script="$select_path $quoted_key"
-      icon="•"
+      icon="●"
+      case "$severity" in
+        good) indicator_color="${OPENUSAGE_SKETCHYBAR_GOOD_COLOR:-0xffa6da95}" ;;
+        warn) indicator_color="${OPENUSAGE_SKETCHYBAR_WARN_COLOR:-0xffeed49f}" ;;
+        bad) indicator_color="${OPENUSAGE_SKETCHYBAR_BAD_COLOR:-0xffed8796}" ;;
+        *) indicator_color="${OPENUSAGE_SKETCHYBAR_UNKNOWN_COLOR:-0xffcad3f5}" ;;
+      esac
     fi
     color="${OPENUSAGE_SKETCHYBAR_TEXT_COLOR:-0xffcad3f5}"
     [ "$selected_row" = "1" ] && color="${OPENUSAGE_SKETCHYBAR_GOOD_COLOR:-0xffa6da95}"
     [ "$pinned_row" = "1" ] && label="🔒 $label"
     item="openusage.switch.row.$index"
     sketchybar --add item "$item" "popup.$SWITCHER" \
-      --set "$item" icon="$icon" icon.font="Hack Nerd Font:Regular:14.0" icon.color="$color" icon.width=20 \
+      --set "$item" icon="$icon" icon.font="Hack Nerd Font:Regular:15.0" icon.color="$indicator_color" icon.width=16 icon.padding_right=4 \
         label="$label" label.font="Hack Nerd Font:Regular:12.0" label.color="$color" \
         click_script="$click_script" background.padding_left=6 background.padding_right=6
     index=$((index + 1))

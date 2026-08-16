@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -231,12 +232,32 @@ func (s *Service) handleActiveList(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(status) == "" {
 		status = "no_data"
 	}
+	candidates := candidateSeverities(computed.input.Candidates, computed.byKey, s.now().UTC())
 	writeJSON(w, http.StatusOK, active.CandidateList{
 		Selected:   computed.selection.Selected,
 		Pinned:     computed.input.PinnedKey,
 		Status:     status,
-		Candidates: computed.input.Candidates,
+		Candidates: candidates,
 	})
+}
+
+func candidateSeverities(
+	candidates []active.Candidate,
+	byKey map[string]core.UsageSnapshot,
+	now time.Time,
+) []active.Candidate {
+	decorated := make([]active.Candidate, len(candidates))
+	copy(decorated, candidates)
+	for i := range decorated {
+		snap, ok := byKey[decorated[i].Key]
+		if !ok {
+			decorated[i].Severity = active.SeverityUnknown
+			continue
+		}
+		facts := active.BuildFacts(snap, now)
+		_, decorated[i].Severity = active.Narrate(facts, now)
+	}
+	return decorated
 }
 
 func (s *Service) handleActiveDetail(w http.ResponseWriter, r *http.Request) {
@@ -294,10 +315,15 @@ func buildActiveDetailResponse(
 			continue
 		}
 		metric := snap.Metrics[key]
+		if activeDetailIsCost(key, metric) {
+			// The shell integrations deliberately never surface spend.
+			continue
+		}
 		resetAt := metricResetAt(snap, key, metric)
 		response.Rows = append(response.Rows, active.DetailRow{
 			Name:      key,
 			Display:   formatActiveMetricDisplay(metric, resetAt, now),
+			Primary:   activeDetailIsPrimary(key),
 			Limit:     metric.Limit,
 			Remaining: metric.Remaining,
 			Used:      metric.Used,
@@ -359,5 +385,47 @@ func formatActiveMetricDisplay(metric core.Metric, resetAt *time.Time, now time.
 }
 
 func formatActiveNumber(value float64) string {
-	return strconv.FormatFloat(value, 'f', -1, 64)
+	// Raw float64 arithmetic produces values like 115.45194054314815, which
+	// are unreadable in a status-bar row. Whole numbers stay whole; anything
+	// fractional is rounded to two places.
+	if value == math.Trunc(value) {
+		return strconv.FormatFloat(value, 'f', 0, 64)
+	}
+	return strconv.FormatFloat(value, 'f', 2, 64)
+}
+
+// activeDetailIsCost reports whether a metric expresses spend. The
+// active-detail endpoint feeds status-bar popups, which by design never show
+// money.
+func activeDetailIsCost(key string, metric core.Metric) bool {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	if strings.Contains(lower, "cost") || strings.Contains(lower, "_usd") || strings.HasSuffix(lower, "usd") || strings.Contains(lower, "spend") {
+		return true
+	}
+	unit := strings.ToLower(strings.TrimSpace(metric.Unit))
+	return unit == "usd" || unit == "$" || strings.Contains(unit, "dollar")
+}
+
+// activeDetailPrimaryKeys are the metric-name fragments a compact consumer
+// renders. Matching is by fragment so it holds across providers rather than
+// hardcoding one vendor's metric names.
+var activeDetailPrimaryKeys = []string{
+	"rate_limit_primary",
+	"plan_percent_used",
+	"quota_runout_hours",
+	"quota_burn_rate",
+	"messages_today",
+	"sessions_today",
+	"tool_calls_today",
+}
+
+// activeDetailIsPrimary reports whether a row belongs in a compact popup.
+func activeDetailIsPrimary(key string) bool {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	for _, want := range activeDetailPrimaryKeys {
+		if lower == want {
+			return true
+		}
+	}
+	return false
 }

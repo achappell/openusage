@@ -259,6 +259,9 @@ func TestActiveHTTPAPI(t *testing.T) {
 	if list.Selected != sel.Selected || len(list.Candidates) != 1 {
 		t.Fatalf("active list = %+v", list)
 	}
+	if list.Candidates[0].Severity != active.SeverityWarn {
+		t.Fatalf("candidate severity = %q, want %q", list.Candidates[0].Severity, active.SeverityWarn)
+	}
 	detail, err := client.ActiveDetail(ctx)
 	if err != nil {
 		t.Fatalf("client ActiveDetail: %v", err)
@@ -313,6 +316,61 @@ func TestActiveDetailFollowsMetricResetKey(t *testing.T) {
 	}
 	if response.Rows[0].ResetAt == nil || !response.Rows[0].ResetAt.Equal(reset) {
 		t.Fatalf("reset = %v, want %v", response.Rows[0].ResetAt, reset)
+	}
+}
+
+func TestActiveDetailOmitsCostAndMarksPrimary(t *testing.T) {
+	cost := 26.46
+	burn := 0.7362370835
+	used := 15.0
+	limit := 100.0
+	tokens := 1188049.0
+
+	snap := core.NewUsageSnapshot("codex", "codex-cli")
+	snap.Metrics["all_time_api_cost"] = core.Metric{Used: &cost, Unit: "USD", Window: "all-time"}
+	snap.Metrics["model_gpt_cost_usd"] = core.Metric{Used: &cost, Unit: "USD", Window: "30d"}
+	snap.Metrics["quota_burn_rate"] = core.Metric{Used: &burn, Unit: "%/hour", Window: "current"}
+	snap.Metrics["plan_percent_used"] = core.Metric{Used: &used, Limit: &limit, Unit: "%", Window: "7d"}
+	snap.Metrics["client_cli_total_tokens"] = core.Metric{Used: &tokens, Unit: "tokens", Window: "30d"}
+
+	selection := active.Selection{Selected: "codex:codex-cli", Display: "codex", Status: "ok"}
+	response := buildActiveDetailResponse(selection, map[string]core.UsageSnapshot{
+		selection.Selected: snap,
+	}, time.Now().UTC())
+
+	for _, row := range response.Rows {
+		if strings.Contains(strings.ToLower(row.Name), "cost") || strings.Contains(row.Display, "USD") {
+			t.Fatalf("cost row leaked into active detail: %+v", row)
+		}
+	}
+
+	primary := map[string]bool{}
+	for _, row := range response.Rows {
+		if row.Primary {
+			primary[row.Name] = true
+		}
+	}
+	for _, want := range []string{"quota_burn_rate", "plan_percent_used"} {
+		if !primary[want] {
+			t.Fatalf("expected %q to be primary, got rows %+v", want, response.Rows)
+		}
+	}
+	if primary["client_cli_total_tokens"] {
+		t.Fatalf("client_cli_total_tokens should not be primary")
+	}
+}
+
+func TestFormatActiveNumberRounds(t *testing.T) {
+	cases := map[float64]string{
+		115.45194054314815: "115.45",
+		0.7362370835:       "0.74",
+		29:                 "29",
+		1188049:            "1188049",
+	}
+	for in, want := range cases {
+		if got := formatActiveNumber(in); got != want {
+			t.Fatalf("formatActiveNumber(%v) = %q, want %q", in, got, want)
+		}
 	}
 }
 

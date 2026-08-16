@@ -371,10 +371,11 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 	if subscription.RollingUsageOK || subscription.WeeklyUsageOK || subscription.MonthlyUsageOK {
 		if subscription.RollingUsageOK {
 			snap.Metrics["rolling_usage"] = core.Metric{
-				Used:   core.Float64Ptr(subscription.RollingUsagePct),
-				Limit:  core.Float64Ptr(100),
-				Unit:   "percent",
-				Window: "rolling-5h",
+				Used:     core.Float64Ptr(subscription.RollingUsagePct),
+				Limit:    core.Float64Ptr(100),
+				Unit:     "percent",
+				Window:   "rolling-5h",
+				ResetKey: "rolling_usage_reset",
 			}
 			if subscription.RollingResetSec > 0 {
 				snap.Resets["rolling_usage_reset"] = snap.Timestamp.Add(
@@ -383,10 +384,11 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 		}
 		if subscription.WeeklyUsageOK {
 			snap.Metrics["weekly_usage"] = core.Metric{
-				Used:   core.Float64Ptr(subscription.WeeklyUsagePct),
-				Limit:  core.Float64Ptr(100),
-				Unit:   "percent",
-				Window: "7d",
+				Used:     core.Float64Ptr(subscription.WeeklyUsagePct),
+				Limit:    core.Float64Ptr(100),
+				Unit:     "percent",
+				Window:   "7d",
+				ResetKey: "weekly_usage_reset",
 			}
 			if subscription.WeeklyResetSec > 0 {
 				snap.Resets["weekly_usage_reset"] = snap.Timestamp.Add(
@@ -395,10 +397,11 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 		}
 		if subscription.MonthlyUsageOK {
 			snap.Metrics["monthly_usage_pct"] = core.Metric{
-				Used:   core.Float64Ptr(subscription.MonthlyUsagePct),
-				Limit:  core.Float64Ptr(100),
-				Unit:   "percent",
-				Window: "month",
+				Used:     core.Float64Ptr(subscription.MonthlyUsagePct),
+				Limit:    core.Float64Ptr(100),
+				Unit:     "percent",
+				Window:   "month",
+				ResetKey: "monthly_usage_pct_reset",
 			}
 			if subscription.MonthlyResetSec > 0 {
 				snap.Resets["monthly_usage_pct_reset"] = snap.Timestamp.Add(
