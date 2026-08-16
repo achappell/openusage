@@ -24,6 +24,8 @@ seconds, the CLI falls back to the existing local-file activity detector.
 ```bash
 openusage active                 # human-readable label
 openusage active --json          # selection and facts
+openusage active detail --json   # selected provider's metric rows
+openusage active list --json     # all selectable provider accounts
 openusage active --explain       # decision trace
 openusage active pin codex:default
 openusage active unpin

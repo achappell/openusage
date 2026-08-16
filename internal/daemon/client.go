@@ -148,6 +148,76 @@ func (c *Client) Active(ctx context.Context) (active.Selection, error) {
 	return out, nil
 }
 
+// ActiveList returns the daemon's current selector candidates for a switcher
+// or other consumer that needs the evidence behind the active selection.
+func (c *Client) ActiveList(ctx context.Context) (active.CandidateList, error) {
+	if c == nil || strings.TrimSpace(c.SocketPath) == "" {
+		return active.CandidateList{}, fmt.Errorf("daemon client is not configured")
+	}
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		"http://unix/v1/active/list",
+		bytes.NewReader([]byte("{}")),
+	)
+	if err != nil {
+		return active.CandidateList{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return active.CandidateList{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return active.CandidateList{}, fmt.Errorf("daemon active list failed: %s", strings.TrimSpace(string(body)))
+	}
+	var out active.CandidateList
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return active.CandidateList{}, fmt.Errorf("decode daemon active list response: %w", err)
+	}
+	if out.Candidates == nil {
+		out.Candidates = []active.Candidate{}
+	}
+	return out, nil
+}
+
+// ActiveDetail returns structured metric rows for the currently selected
+// provider. It deliberately shares the daemon's active-selection decision.
+func (c *Client) ActiveDetail(ctx context.Context) (active.DetailResponse, error) {
+	if c == nil || strings.TrimSpace(c.SocketPath) == "" {
+		return active.DetailResponse{}, fmt.Errorf("daemon client is not configured")
+	}
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		"http://unix/v1/active/detail",
+		bytes.NewReader([]byte("{}")),
+	)
+	if err != nil {
+		return active.DetailResponse{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return active.DetailResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return active.DetailResponse{}, fmt.Errorf("daemon active detail failed: %s", strings.TrimSpace(string(body)))
+	}
+	var out active.DetailResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return active.DetailResponse{}, fmt.Errorf("decode daemon active detail response: %w", err)
+	}
+	if out.Rows == nil {
+		out.Rows = []active.DetailRow{}
+	}
+	return out, nil
+}
+
 // ActiveExplain asks the daemon to explain the exact selection decision it
 // would make for the current telemetry/read-model state.
 func (c *Client) ActiveExplain(ctx context.Context) (string, error) {

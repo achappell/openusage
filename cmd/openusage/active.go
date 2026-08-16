@@ -41,6 +41,8 @@ less precise and cannot see API-key-only providers; responses then report
 source "local".`,
 		Example: strings.Join([]string{
 			"  openusage active --json",
+			"  openusage active detail --json",
+			"  openusage active list --json",
 			"  openusage active pin codex:default",
 			"  openusage active unpin",
 		}, "\n"),
@@ -66,6 +68,33 @@ source "local".`,
 		},
 	}
 	cmd.AddCommand(pin, unpin)
+	cmd.AddCommand(newActiveDetailCommand(&opts), newActiveListCommand(&opts))
+	return cmd
+}
+
+func newActiveDetailCommand(parent *activeOptions) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "detail",
+		Short: "Show structured metric rows for the active provider",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runActiveDetail(activeOptions{socketPath: parent.socketPath, asJSON: asJSON, out: parent.out})
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON instead of human-readable rows")
+	return cmd
+}
+
+func newActiveListCommand(parent *activeOptions) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List active-provider candidates for a switcher",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runActiveList(activeOptions{socketPath: parent.socketPath, asJSON: asJSON, out: parent.out})
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON instead of human-readable rows")
 	return cmd
 }
 
@@ -115,6 +144,73 @@ func runActiveExplain(opts activeOptions) error {
 		"daemon unavailable; using local mtime detection\nwinner: %s (source: %s)\n",
 		res.Primary, res.Source)
 	return err
+}
+
+func runActiveDetail(opts activeOptions) error {
+	if opts.out == nil {
+		opts.out = os.Stdout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), activeTimeout)
+	defer cancel()
+	detail, err := daemon.NewClient(resolveActiveSocketPath(opts.socketPath)).ActiveDetail(ctx)
+	if err != nil {
+		return fmt.Errorf("active detail: %w", err)
+	}
+	if opts.asJSON {
+		enc := json.NewEncoder(opts.out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(detail)
+	}
+	if detail.Selection.Status != "ok" {
+		_, err := fmt.Fprintf(opts.out, "AI %s\n", detail.Status)
+		return err
+	}
+	if _, err := fmt.Fprintf(opts.out, "%s %s\n", detail.Selection.Display, detail.Selection.Label); err != nil {
+		return err
+	}
+	for _, row := range detail.Rows {
+		if strings.TrimSpace(row.Display) == "" {
+			continue
+		}
+		if _, err := fmt.Fprintf(opts.out, "  %-28s %s\n", row.Name, row.Display); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runActiveList(opts activeOptions) error {
+	if opts.out == nil {
+		opts.out = os.Stdout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), activeTimeout)
+	defer cancel()
+	list, err := daemon.NewClient(resolveActiveSocketPath(opts.socketPath)).ActiveList(ctx)
+	if err != nil {
+		return fmt.Errorf("active list: %w", err)
+	}
+	if opts.asJSON {
+		enc := json.NewEncoder(opts.out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(list)
+	}
+	if _, err := fmt.Fprintf(opts.out, "status: %s\n", list.Status); err != nil {
+		return err
+	}
+	for _, candidate := range list.Candidates {
+		marker := " "
+		if candidate.Key == list.Selected {
+			marker = "*"
+		}
+		last := "never"
+		if candidate.LastEventAt != nil {
+			last = candidate.LastEventAt.Local().Format("2006-01-02 15:04:05")
+		}
+		if _, err := fmt.Fprintf(opts.out, "%s %-24s %s (last event: %s)\n", marker, candidate.Key, candidate.Display, last); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resolveActive asks the daemon, falling back to local mtime detection.

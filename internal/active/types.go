@@ -51,3 +51,37 @@ type Selection struct {
 	// Status is "ok", "no_data", or "unavailable".
 	Status string `json:"status"`
 }
+
+// CandidateList is the selector's current candidate set. It is intentionally
+// small: status-bar consumers need stable keys and event evidence, not full
+// provider snapshots.
+type CandidateList struct {
+	Selected   string      `json:"selected,omitempty"`
+	Pinned     string      `json:"pinned,omitempty"`
+	Status     string      `json:"status"`
+	Candidates []Candidate `json:"candidates"`
+}
+
+// DetailResponse contains the selected provider's structured metric rows.
+// Consumers may use Display for a compact row, or the numeric fields when
+// they need their own presentation.
+type DetailResponse struct {
+	Selection Selection   `json:"selection"`
+	Rows      []DetailRow `json:"rows"`
+	Status    string      `json:"status"`
+	Message   string      `json:"message,omitempty"`
+}
+
+// DetailRow is a safe, presentation-ready view of one snapshot metric. Raw
+// provider metadata is deliberately absent; this endpoint is suitable for
+// shell integrations and should not become a credentials/debug dump.
+type DetailRow struct {
+	Name      string     `json:"name"`
+	Display   string     `json:"display"`
+	Limit     *float64   `json:"limit,omitempty"`
+	Remaining *float64   `json:"remaining,omitempty"`
+	Used      *float64   `json:"used,omitempty"`
+	Unit      string     `json:"unit,omitempty"`
+	Window    string     `json:"window,omitempty"`
+	ResetAt   *time.Time `json:"reset_at,omitempty"`
+}

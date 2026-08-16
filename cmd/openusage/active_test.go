@@ -35,7 +35,7 @@ func TestActiveCommandHasPinControls(t *testing.T) {
 	if cmd.Commands() == nil {
 		t.Fatal("active command has no subcommands")
 	}
-	want := map[string]bool{"pin": false, "unpin": false}
+	want := map[string]bool{"pin": false, "unpin": false, "detail": false, "list": false}
 	for _, child := range cmd.Commands() {
 		if _, ok := want[child.Name()]; ok {
 			want[child.Name()] = true

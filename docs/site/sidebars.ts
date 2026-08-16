@@ -141,6 +141,7 @@ const sidebars: SidebarsConfig = {
         'guides/cache-hit-ratio',
         'guides/cli-reports',
         'guides/tmux-integration',
+        'guides/sketchybar-integration',
         'guides/claude-code-statusline',
         'guides/headless-servers',
         'guides/multi-machine',
