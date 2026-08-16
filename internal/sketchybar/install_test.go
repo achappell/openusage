@@ -19,6 +19,10 @@ func setTestHome(t *testing.T, home string) {
 }
 
 func TestBuildSnippetUsesNeutralAssetDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sketchybar is macOS-only; path expansion rewrites POSIX separators on windows")
+	}
+
 	snippet, err := BuildSnippet(InstallOptions{
 		Preset:  DefaultPreset,
 		Binary:  "/Applications/Open Usage/openusage",
@@ -55,6 +59,10 @@ func TestBuildSnippetUsesNeutralAssetDirectory(t *testing.T) {
 }
 
 func TestInstallWritesAssetsAndSentinel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix execute bit semantics do not apply on windows")
+	}
+
 	home := t.TempDir()
 	setTestHome(t, home)
 	configPath := filepath.Join(home, ".config", "sketchybar", "sketchybarrc")
