@@ -243,16 +243,32 @@ jobs:
 
             def caveats
               <<~EOS
-                Homebrew 6.0+ requires third-party taps to be trusted. A trust grant
-                only covers the formula version it was made for, so each \`brew update\`
-                that bumps openusage can leave the keg installed-but-unlinked
-                ("command not found" until you run \`brew link\`).
+                If \`openusage\` is missing after an install or upgrade, the keg is
+                installed but unlinked. There are two known causes.
 
-                Trust the whole tap once to keep openusage linked across upgrades:
+                1. Tap trust. Homebrew 6.0+ requires third-party taps to be trusted,
+                   and a trust grant only covers the formula version it was made for,
+                   so each \`brew update\` that bumps openusage can leave the keg
+                   unlinked. Trust the whole tap once to keep it linked across
+                   upgrades:
 
-                  brew trust achappell/tap
+                     brew trust achappell/tap
 
-                See https://docs.brew.sh/Tap-Trust for details.
+                   See https://docs.brew.sh/Tap-Trust for details.
+
+                2. Tap ambiguity. If another installed tap also defines a formula
+                   named "openusage", Homebrew cannot resolve the bare name and
+                   skips the link step. Check with:
+
+                     brew info --formula openusage
+
+                   An error reading "Formulae found in multiple taps" confirms it.
+                   Remove the tap you do not use, or always use the fully-qualified
+                   name.
+
+                Either way, this restores the command immediately:
+
+                  brew link achappell/tap/openusage
               EOS
             end
 
