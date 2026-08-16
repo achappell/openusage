@@ -201,6 +201,7 @@ func deepCloneMetrics(m map[string]Metric) map[string]Metric {
 			Used:      cloneFloat64Ptr(v.Used),
 			Unit:      v.Unit,
 			Window:    v.Window,
+			ResetKey:  v.ResetKey,
 		}
 	}
 	return out

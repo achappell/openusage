@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 type activeComputation struct {
 	selection active.Selection
 	input     active.SelectInput
+	byKey     map[string]core.UsageSnapshot
 }
 
 // computeActive resolves the current active provider and narrates its quota
@@ -78,6 +80,7 @@ func (s *Service) computeActiveDetails(ctx context.Context) (activeComputation, 
 	return activeComputation{
 		selection: buildActiveSelectionFromInput(input, byKey, s.now().UTC()),
 		input:     input,
+		byKey:     byKey,
 	}, nil
 }
 
@@ -214,6 +217,41 @@ func (s *Service) handleActiveExplain(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Service) handleActiveList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	computed, err := s.computeActiveDetails(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	status := computed.selection.Status
+	if strings.TrimSpace(status) == "" {
+		status = "no_data"
+	}
+	writeJSON(w, http.StatusOK, active.CandidateList{
+		Selected:   computed.selection.Selected,
+		Pinned:     computed.input.PinnedKey,
+		Status:     status,
+		Candidates: computed.input.Candidates,
+	})
+}
+
+func (s *Service) handleActiveDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	computed, err := s.computeActiveDetails(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, buildActiveDetailResponse(computed.selection, computed.byKey, s.now().UTC()))
+}
+
 func (s *Service) handleActivePin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -229,4 +267,97 @@ func (s *Service) handleActivePin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func buildActiveDetailResponse(
+	selection active.Selection,
+	byKey map[string]core.UsageSnapshot,
+	now time.Time,
+) active.DetailResponse {
+	response := active.DetailResponse{
+		Selection: selection,
+		Rows:      make([]active.DetailRow, 0),
+		Status:    selection.Status,
+	}
+	if selection.Status == "" {
+		response.Status = "no_data"
+	}
+
+	snap, ok := byKey[selection.Selected]
+	if !ok {
+		return response
+	}
+	response.Message = snap.Message
+	keys := core.SortedStringKeys(snap.Metrics)
+	for _, key := range keys {
+		if !core.IncludeDetailMetricKey(key) {
+			continue
+		}
+		metric := snap.Metrics[key]
+		resetAt := metricResetAt(snap, key, metric)
+		response.Rows = append(response.Rows, active.DetailRow{
+			Name:      key,
+			Display:   formatActiveMetricDisplay(metric, resetAt, now),
+			Limit:     metric.Limit,
+			Remaining: metric.Remaining,
+			Used:      metric.Used,
+			Unit:      metric.Unit,
+			Window:    metric.Window,
+			ResetAt:   resetAt,
+		})
+	}
+	return response
+}
+
+func metricResetAt(snap core.UsageSnapshot, name string, metric core.Metric) *time.Time {
+	resetKey := strings.TrimSpace(metric.ResetKey)
+	if resetKey == "" {
+		resetKey = name
+	}
+	reset, ok := snap.Resets[resetKey]
+	if !ok {
+		return nil
+	}
+	reset = reset.UTC()
+	return &reset
+}
+
+func formatActiveMetricDisplay(metric core.Metric, resetAt *time.Time, now time.Time) string {
+	unit := strings.TrimSpace(metric.Unit)
+	var value string
+	switch {
+	case metric.Limit != nil && metric.Used != nil:
+		if unit == "%" || strings.EqualFold(unit, "percent") || strings.EqualFold(unit, "percentage") {
+			value = fmt.Sprintf("%.0f%% / %.0f%%", *metric.Used, *metric.Limit)
+		} else {
+			value = formatActiveNumber(*metric.Used) + " / " + formatActiveNumber(*metric.Limit)
+		}
+	case metric.Limit != nil && metric.Remaining != nil:
+		value = formatActiveNumber(*metric.Remaining) + " / " + formatActiveNumber(*metric.Limit) + " left"
+	case metric.Used != nil:
+		value = formatActiveNumber(*metric.Used)
+	case metric.Remaining != nil:
+		value = formatActiveNumber(*metric.Remaining) + " left"
+	}
+	if value == "" {
+		return ""
+	}
+	if unit != "" && unit != "%" && !strings.Contains(value, unit) {
+		value += " " + unit
+	}
+	if window := strings.TrimSpace(metric.Window); window != "" {
+		value += " · " + window
+	}
+	if resetAt != nil {
+		resetLabel := resetAt.Local().Format("Jan 2 15:04")
+		if !resetAt.After(now) {
+			resetLabel = "now"
+		}
+		value += " · reset " + resetLabel
+	}
+	return value
+}
+
+func formatActiveNumber(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }

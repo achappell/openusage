@@ -227,6 +227,8 @@ func TestActiveHTTPAPI(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/active", srv.handleActive)
 	mux.HandleFunc("/v1/active/explain", srv.handleActiveExplain)
+	mux.HandleFunc("/v1/active/list", srv.handleActiveList)
+	mux.HandleFunc("/v1/active/detail", srv.handleActiveDetail)
 	mux.HandleFunc("/v1/active/pin", srv.handleActivePin)
 	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "active.sock"))
 	if err != nil {
@@ -250,6 +252,21 @@ func TestActiveHTTPAPI(t *testing.T) {
 		t.Fatalf("active selection = %+v", sel)
 	}
 
+	list, err := client.ActiveList(ctx)
+	if err != nil {
+		t.Fatalf("client ActiveList: %v", err)
+	}
+	if list.Selected != sel.Selected || len(list.Candidates) != 1 {
+		t.Fatalf("active list = %+v", list)
+	}
+	detail, err := client.ActiveDetail(ctx)
+	if err != nil {
+		t.Fatalf("client ActiveDetail: %v", err)
+	}
+	if detail.Selection.Selected != sel.Selected || detail.Status != "ok" {
+		t.Fatalf("active detail = %+v", detail)
+	}
+
 	if err := client.SetPin(ctx, "codex:codex-default"); err != nil {
 		t.Fatalf("client SetPin: %v", err)
 	}
@@ -271,6 +288,31 @@ func TestActiveHTTPAPI(t *testing.T) {
 
 	if err := client.SetPin(ctx, ""); err != nil {
 		t.Fatalf("client clear pin: %v", err)
+	}
+}
+
+func TestActiveDetailFollowsMetricResetKey(t *testing.T) {
+	reset := time.Now().Add(time.Hour).UTC()
+	used := 40.0
+	limit := 100.0
+	snap := core.NewUsageSnapshot("claude_code", "claude-default")
+	snap.Metrics["usage_five_hour"] = core.Metric{
+		Used: &used, Limit: &limit, Unit: "%", Window: "5h", ResetKey: "billing_block",
+	}
+	snap.Resets["billing_block"] = reset
+	selection := active.Selection{
+		Selected: "claude_code:claude-default",
+		Display:  "claude",
+		Status:   "ok",
+	}
+	response := buildActiveDetailResponse(selection, map[string]core.UsageSnapshot{
+		selection.Selected: snap,
+	}, time.Now().UTC())
+	if len(response.Rows) != 1 {
+		t.Fatalf("rows = %+v, want one row", response.Rows)
+	}
+	if response.Rows[0].ResetAt == nil || !response.Rows[0].ResetAt.Equal(reset) {
+		t.Fatalf("reset = %v, want %v", response.Rows[0].ResetAt, reset)
 	}
 }
 
