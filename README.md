@@ -68,6 +68,7 @@ openusage session              # grouped by session
 openusage blocks               # by 5-hour billing block, with burn rate + projection
 openusage daily --json         # machine-readable output for scripts/CI
 openusage statusline install   # one-line status bar for Claude Code
+openusage sketchybar install --write  # active provider + quota in SketchyBar (macOS)
 ```
 
 What each report can show, by provider:
@@ -119,6 +120,20 @@ openusage tmux doctor                          # diagnose if something is off
 
 See the [tmux integration guide](docs/site/docs/guides/tmux-integration.md) for the format grammar, theming, the icon font, and watch-mode alerts.
 
+### Add to SketchyBar (macOS)
+
+Show the active provider and quota in SketchyBar, with a detail popup and a
+provider/account switcher:
+
+```bash
+openusage sketchybar install --write
+sketchybar --reload
+```
+
+Requires SketchyBar, `jq`, and the OpenUsage telemetry daemon. See the
+[SketchyBar integration guide](docs/site/docs/guides/sketchybar-integration.md)
+for configuration, presets, and troubleshooting.
+
 ### Claude Code statusline
 
 Your cost, burn rate, how much of the 5-hour limit you've used, and how full the context window is. Right in the **Claude Code status bar**:
@@ -165,6 +180,7 @@ If the question is whether this is the right fit versus a simpler local limits t
 - **Zero config** — auto-detects your AI tools and API keys, just run it
 - **Live dashboard** — see spend, quotas, rate limits, tokens, burn rate, and per-model usage at a glance
 - **tmux integration** — show the active tool's usage in your tmux status bar, with provider icons, presets, and active-tool detection
+- **SketchyBar integration (macOS)** — show the active provider, quota label, detail popup, and provider switcher
 - **Claude Code statusline** — one-line session cost, today's cost, burn rate, and context usage in Claude Code
 - **Headless reports** — `daily`, `weekly`, `monthly`, `session`, and `blocks` reports in table or JSON
 - **Background tracking** — a daemon collects data continuously, even when the dashboard is closed, into a local SQLite database you own
