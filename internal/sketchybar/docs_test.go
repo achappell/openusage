@@ -41,7 +41,46 @@ func TestDocsSnippetUpToDate(t *testing.T) {
 		t.Logf("rewrote %s", path)
 		return
 	}
-	t.Fatalf("%s is stale; regenerate with `make docs-sketchybar`", docsGuidePath)
+	t.Fatalf("%s is stale; regenerate with `make docs-sketchybar`\nwant block:\n%s", docsGuidePath, mustDocsBlock(t))
+}
+
+func mustDocsBlock(t *testing.T) string {
+	t.Helper()
+	block, err := DocsSnippetBlock()
+	if err != nil {
+		t.Fatalf("DocsSnippetBlock: %v", err)
+	}
+	return block
+}
+
+// TestSyncDocsSnippetNormalizesCRLF pins the fix for a windows-only CI break.
+// Git for Windows checks out CRLF by default, so a guide that was byte-correct
+// still compared unequal against LF-generated content and every run reported
+// the docs as stale.
+func TestSyncDocsSnippetNormalizesCRLF(t *testing.T) {
+	raw, err := os.ReadFile(filepath.FromSlash(docsGuidePath))
+	if err != nil {
+		t.Fatalf("read guide: %v", err)
+	}
+	// The checkout itself may already be CRLF (this test also runs on windows),
+	// so normalise before building the fixture. Replacing "\n" in CRLF content
+	// would yield "\r\r\n" and test nothing real.
+	lf := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	if _, changed, err := SyncDocsSnippet(lf); err != nil || changed {
+		t.Fatalf("LF guide should already be in sync: changed=%v err=%v", changed, err)
+	}
+
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+	if crlf == lf {
+		t.Fatal("CRLF fixture is identical to the LF source; the test proves nothing")
+	}
+	_, changed, err := SyncDocsSnippet(crlf)
+	if err != nil {
+		t.Fatalf("sync CRLF guide: %v", err)
+	}
+	if changed {
+		t.Fatal("a CRLF checkout of an up-to-date guide was reported as stale")
+	}
 }
 
 // TestDocsSnippetBlockIsFenced guards the generator itself: a malformed block

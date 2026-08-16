@@ -31,17 +31,26 @@ func DocsSnippetBlock() (string, error) {
 // whether the content changed. The block is located by the same sentinels the
 // installer writes into sketchybarrc, so no extra markers are needed in the
 // Markdown — and MDX never sees an HTML comment it cannot parse.
+//
+// Line endings are normalised to LF first. Git for Windows checks out CRLF by
+// default, and comparing a CRLF working copy against LF-generated content
+// reports every file as stale no matter its content.
 func SyncDocsSnippet(doc string) (string, bool, error) {
 	block, err := DocsSnippetBlock()
 	if err != nil {
 		return "", false, err
 	}
+	doc = normalizeNewlines(doc)
 	start, end, err := docsSnippetBounds(doc)
 	if err != nil {
 		return "", false, err
 	}
 	updated := doc[:start] + block + doc[end:]
 	return updated, updated != doc, nil
+}
+
+func normalizeNewlines(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
 }
 
 // docsSnippetBounds returns the byte range of the fenced block that holds the
