@@ -338,6 +338,13 @@ func openActiveTestService(t *testing.T, dbPath string) *Service {
 	if err != nil {
 		t.Fatalf("open active test store: %v", err)
 	}
+	// Windows cannot unlink an open file, so t.TempDir cleanup fails unless
+	// the SQLite handle is closed first.
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close active test store: %v", err)
+		}
+	})
 	srv := &Service{
 		cfg:     Config{DBPath: dbPath},
 		store:   store,
