@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -20,7 +21,22 @@ const docsGuidePath = "../../docs/site/docs/guides/sketchybar-integration.md"
 // documented config with a switcher that responded to nothing.
 //
 // Regenerate with: make docs-sketchybar
+// skipIfWindows guards the checks that compare generated snippet content.
+// BuildSnippet routes DataDir through expandPath, which ends in filepath.Clean
+// and therefore rewrites "/" to "\\" on windows -- the published block would
+// read OPENUSAGE_SKETCHYBAR_DIR='$HOME\\.local\\share\\...'. SketchyBar is
+// macOS-only, so the guide is POSIX by definition and the freshness check is
+// meaningful only where the separators match. It still runs on ubuntu and macOS.
+func skipIfWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("sketchybar is macOS-only; generated paths use windows separators here")
+	}
+}
+
 func TestDocsSnippetUpToDate(t *testing.T) {
+	skipIfWindows(t)
+
 	path := filepath.FromSlash(docsGuidePath)
 	current, err := os.ReadFile(path)
 	if err != nil {
@@ -58,6 +74,8 @@ func mustDocsBlock(t *testing.T) string {
 // still compared unequal against LF-generated content and every run reported
 // the docs as stale.
 func TestSyncDocsSnippetNormalizesCRLF(t *testing.T) {
+	skipIfWindows(t)
+
 	raw, err := os.ReadFile(filepath.FromSlash(docsGuidePath))
 	if err != nil {
 		t.Fatalf("read guide: %v", err)
