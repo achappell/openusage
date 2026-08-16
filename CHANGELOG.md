@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.25.1 (2026-08-16)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* fix(release): document tap ambiguity in the Homebrew caveats by @achappell in https://github.com/achappell/openusage/pull/7
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.25.0...v0.25.1
+
 ## 0.25.0 (2026-08-16)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
