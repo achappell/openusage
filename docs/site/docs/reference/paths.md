@@ -15,6 +15,7 @@ OpenUsage follows the [XDG Base Directory Specification](https://specifications.
 | `~/.config/openusage/custom-pricing.json` | User pricing overrides. | `OPENUSAGE_CUSTOM_PRICING`, `XDG_CONFIG_HOME` |
 | `~/.config/openusage/themes/` | External themes directory (scanned for `*.json`). | `OPENUSAGE_THEME_DIR` (extra dirs only) |
 | `~/.config/openusage/hooks/` | Hook scripts installed by `openusage integrations`. | — |
+| `~/Library/Caches/openusage/pricing/` | Cached upstream pricing tables (`litellm.json`, `openrouter.json`). `~/.cache/openusage/pricing/` on Linux. Safe to delete; refetched on demand. | `XDG_CACHE_HOME` (Linux), `OPENUSAGE_PRICING_TTL` (freshness window) |
 | `~/.local/state/openusage/` | State directory (DB, socket, spool, logs). | `XDG_STATE_HOME` |
 | `~/.local/state/openusage/telemetry.db` | Daemon SQLite store. | `--db-path` |
 | `~/.local/state/openusage/telemetry.sock` | Daemon Unix domain socket. | `--socket-path`, `OPENUSAGE_TELEMETRY_SOCKET` |
