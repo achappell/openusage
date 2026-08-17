@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.26.1 (2026-08-17)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* fix(pricing): expire in-memory pricing tables instead of latching them by @achappell in https://github.com/achappell/openusage/pull/10
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.0...v0.26.1
+
 ## 0.26.0 (2026-08-16)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
