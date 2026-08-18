@@ -66,7 +66,11 @@ func (m *sessionMetaPayload) ProvenanceModel() string {
 	if m == nil || m.BaseInstructions == nil || m.BaseInstructions.Provenance == nil {
 		return ""
 	}
-	return m.BaseInstructions.Provenance.Model
+	provenance := m.BaseInstructions.Provenance
+	if provenance.Type != "model" {
+		return ""
+	}
+	return provenance.Model
 }
 
 type baseInstructions struct {
