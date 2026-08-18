@@ -71,3 +71,95 @@ func TestLastEventTimesEmptyStore(t *testing.T) {
 		t.Errorf("got %v, want empty", got)
 	}
 }
+
+func TestLastEventTimesAliasesClaudeCodeHookEvents(t *testing.T) {
+	_, db, store := openUsageViewRawTestStore(t)
+	ctx := context.Background()
+
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO usage_raw_events
+			(raw_event_id, ingested_at, source_system, source_channel,
+			 source_schema_version, source_payload, source_payload_hash)
+		 VALUES ('raw-1', '2026-08-15T12:00:00Z', 'test', 'hook', '1', '{}', 'hash-1')`)
+	if err != nil {
+		t.Fatalf("insert raw: %v", err)
+	}
+
+	insert := func(id, provider, agent, account, occurred string) {
+		t.Helper()
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO usage_events
+				(event_id, occurred_at, provider_id, agent_name, account_id,
+				 event_type, status, dedup_key, raw_event_id, normalization_version)
+			 VALUES (?, ?, ?, ?, ?, 'message_usage', 'ok', ?, 'raw-1', '1')`,
+			id, occurred, provider, agent, account, id)
+		if err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+
+	// Claude Code hook events land under provider_id "anthropic" while the
+	// credential poller registers the candidate as "claude_code". They must
+	// collapse onto the poller's key or active selection never sees Claude.
+	insert("hook-1", "anthropic", "claude_code", "claude-code", "2026-08-15T14:00:00Z")
+	// A newer Anthropic API-key event from a different agent must NOT be
+	// folded into the Claude Code candidate.
+	insert("api-1", "anthropic", "some_other_agent", "claude-code", "2026-08-15T18:00:00Z")
+	insert("codex-1", "codex", "codex_cli", "codex-cli", "2026-08-15T13:00:00Z")
+
+	got, err := store.LastEventTimes(ctx)
+	if err != nil {
+		t.Fatalf("LastEventTimes: %v", err)
+	}
+
+	wantHook := time.Date(2026, 8, 15, 14, 0, 0, 0, time.UTC)
+	if !got["claude_code:claude-code"].Equal(wantHook) {
+		t.Errorf("claude_code:claude-code = %v, want %v", got["claude_code:claude-code"], wantHook)
+	}
+	wantAPI := time.Date(2026, 8, 15, 18, 0, 0, 0, time.UTC)
+	if !got["anthropic:claude-code"].Equal(wantAPI) {
+		t.Errorf("anthropic:claude-code = %v, want %v", got["anthropic:claude-code"], wantAPI)
+	}
+	wantCodex := time.Date(2026, 8, 15, 13, 0, 0, 0, time.UTC)
+	if !got["codex:codex-cli"].Equal(wantCodex) {
+		t.Errorf("codex:codex-cli = %v, want %v", got["codex:codex-cli"], wantCodex)
+	}
+}
+
+func TestLastEventTimesAliasKeepsLaterPollerKeyEvent(t *testing.T) {
+	_, db, store := openUsageViewRawTestStore(t)
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO usage_raw_events
+			(raw_event_id, ingested_at, source_system, source_channel,
+			 source_schema_version, source_payload, source_payload_hash)
+		 VALUES ('raw-1', '2026-08-15T12:00:00Z', 'test', 'hook', '1', '{}', 'hash-1')`); err != nil {
+		t.Fatalf("insert raw: %v", err)
+	}
+
+	insert := func(id, provider, agent, occurred string) {
+		t.Helper()
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO usage_events
+				(event_id, occurred_at, provider_id, agent_name, account_id,
+				 event_type, status, dedup_key, raw_event_id, normalization_version)
+			 VALUES (?, ?, ?, ?, 'claude-code', 'message_usage', 'ok', ?, 'raw-1', '1')`,
+			id, occurred, provider, agent, id); err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+
+	// Both spellings carry real activity; the merged key must take the max.
+	insert("hook-1", "anthropic", "claude_code", "2026-08-15T14:00:00Z")
+	insert("native-1", "claude_code", "claude_code", "2026-08-15T16:00:00Z")
+
+	got, err := store.LastEventTimes(ctx)
+	if err != nil {
+		t.Fatalf("LastEventTimes: %v", err)
+	}
+	want := time.Date(2026, 8, 15, 16, 0, 0, 0, time.UTC)
+	if !got["claude_code:claude-code"].Equal(want) {
+		t.Errorf("claude_code:claude-code = %v, want %v", got["claude_code:claude-code"], want)
+	}
+}
