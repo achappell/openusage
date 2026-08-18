@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -133,6 +134,9 @@ func getChromiumEncryptionKey() ([]byte, error) {
 		cmd := exec.Command("security", "find-generic-password", "-w", "-s", "Claude Safe Storage", "-a", account)
 		out, err := cmd.Output()
 		if err != nil {
+			if !keychainItemNotFound(err) {
+				return nil, fmt.Errorf("keychain lookup for account %q failed: %w", account, err)
+			}
 			lastErr = err
 			continue
 		}
@@ -140,7 +144,20 @@ func getChromiumEncryptionKey() ([]byte, error) {
 		key := pbkdf2.Key([]byte(password), []byte("saltysalt"), 1003, 16, sha1.New)
 		return key, nil
 	}
+	if lastErr == nil {
+		return nil, fmt.Errorf("keychain lookup failed: no Safe Storage account names configured")
+	}
 	return nil, fmt.Errorf("keychain lookup failed (is Claude desktop installed and signed in?): %w", lastErr)
+}
+
+func keychainItemNotFound(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+
+	message := strings.ToLower(string(exitErr.Stderr))
+	return strings.Contains(message, "could not be found") || strings.Contains(message, "item not found")
 }
 
 func decryptChromiumCookie(encrypted []byte, key []byte) (string, error) {
