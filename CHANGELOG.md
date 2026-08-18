@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.26.2 (2026-08-18)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* fix(active): attach Claude Code hook events to their candidate by @achappell in https://github.com/achappell/openusage/pull/12
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.1...v0.26.2
+
 ## 0.26.1 (2026-08-17)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
