@@ -187,6 +187,12 @@ func (p *Provider) applyCreditForecast(snap *core.UsageSnapshot, accountID strin
 		key = snap.AccountID
 	}
 
+	// Record every poll before branching. A richer source (account daily
+	// history) returns early, and if that source later drops out the
+	// observed-usage fallback must already hold samples rather than starting
+	// cold and going quiet for two polls.
+	history := p.recordCreditObservation(key, creditUsageObservation{at: snap.Timestamp, used: used, limit: limit})
+
 	// Codex exposes the effective individual limit as a monthly quota and
 	// gives us the next reset, but not the current period start. When the next
 	// reset is available, use the corresponding calendar-month boundary so the
@@ -251,38 +257,11 @@ func (p *Provider) applyCreditForecast(snap *core.UsageSnapshot, accountID strin
 		}
 	}
 
-	p.creditHistoryMu.Lock()
-	defer p.creditHistoryMu.Unlock()
-	if p.creditHistory == nil {
-		p.creditHistory = make(map[string][]creditUsageObservation)
-	}
-
-	history := p.creditHistory[key]
-	if len(history) > 0 {
-		last := history[len(history)-1]
-		if last.limit != limit || used < last.used {
-			history = nil
-		}
-	}
-	observation := creditUsageObservation{at: snap.Timestamp, used: used, limit: limit}
-	history = append(history, observation)
-	cutoff := snap.Timestamp.Add(-6 * time.Hour)
-	kept := history[:0]
-	for _, sample := range history {
-		if !sample.at.Before(cutoff) {
-			kept = append(kept, sample)
-		}
-	}
-	if len(kept) > 12 {
-		kept = kept[len(kept)-12:]
-	}
-	p.creditHistory[key] = kept
-
-	if len(kept) < 2 {
+	if len(history) < 2 {
 		return
 	}
-	first := kept[0]
-	last := kept[len(kept)-1]
+	first := history[0]
+	last := history[len(history)-1]
 	duration := last.at.Sub(first.at)
 	if duration <= time.Minute || last.used <= first.used {
 		return
@@ -308,6 +287,41 @@ func (p *Provider) applyCreditForecast(snap *core.UsageSnapshot, accountID strin
 // inferCreditPeriodStart derives the beginning of the current monthly quota
 // period from the next reset returned by Codex. It deliberately returns false
 // when the reset is missing, stale, or not safely in the future.
+// recordCreditObservation appends this poll's cumulative reading and returns
+// the pruned observation window.
+func (p *Provider) recordCreditObservation(key string, observation creditUsageObservation) []creditUsageObservation {
+	if p == nil {
+		return nil
+	}
+	p.creditHistoryMu.Lock()
+	defer p.creditHistoryMu.Unlock()
+	if p.creditHistory == nil {
+		p.creditHistory = make(map[string][]creditUsageObservation)
+	}
+	history := p.creditHistory[key]
+	if len(history) > 0 {
+		last := history[len(history)-1]
+		// A lower cumulative total or a changed quota means the period rolled
+		// over; the samples either side of that are not comparable.
+		if last.limit != observation.limit || observation.used < last.used {
+			history = nil
+		}
+	}
+	history = append(history, observation)
+	cutoff := observation.at.Add(-6 * time.Hour)
+	kept := history[:0]
+	for _, sample := range history {
+		if !sample.at.Before(cutoff) {
+			kept = append(kept, sample)
+		}
+	}
+	if len(kept) > 12 {
+		kept = kept[len(kept)-12:]
+	}
+	p.creditHistory[key] = kept
+	return kept
+}
+
 func inferCreditPeriodStart(resetAt, observedAt time.Time) (time.Time, bool) {
 	resetAt = resetAt.UTC()
 	observedAt = observedAt.UTC()

@@ -326,3 +326,51 @@ func TestApplyCreditLimitOverrideWithoutReportedQuota(t *testing.T) {
 		t.Fatal("expected a missing-reported-quota diagnostic")
 	}
 }
+
+func TestApplyCreditForecastKeepsObservingWhileDailyHistoryWorks(t *testing.T) {
+	p := New()
+	resetAt := time.Date(2026, 9, 1, 0, 0, 0, 0, time.Local)
+	startDay := time.Date(2026, 8, 1, 0, 0, 0, 0, time.Local)
+	limit := 1000.0
+
+	// Two polls an hour apart, both served by the daily-history path.
+	for i, used := range []float64{100, 300} {
+		at := time.Date(2026, 8, 3, 10, 0, 0, 0, time.Local).Add(time.Duration(i) * time.Hour)
+		usedCopy := used
+		snap := core.NewUsageSnapshot("codex", "test")
+		snap.Timestamp = at
+		snap.Metrics["codex_credit_limit"] = core.Metric{Limit: &limit, Used: &usedCopy, Unit: "credits"}
+		snap.Resets["codex_credit_limit"] = resetAt
+		snap.DailySeries = map[string][]core.TimePoint{
+			codexCreditUsageDailySeriesKey: {
+				{Date: formatCodexDay(startDay), Value: 50},
+				{Date: formatCodexDay(startDay.AddDate(0, 0, 1)), Value: 50},
+				{Date: formatCodexDay(at), Value: used - 100},
+			},
+		}
+		p.applyCreditForecast(&snap, "test")
+		if snap.Raw["credit_forecast_source"] != "account_daily_history" {
+			t.Fatalf("poll %d: expected the daily path, got %q", i, snap.Raw["credit_forecast_source"])
+		}
+	}
+
+	// The daily endpoint drops out. The observed-usage fallback must already
+	// hold the samples collected while the daily path was working.
+	used := 500.0
+	snap := core.NewUsageSnapshot("codex", "test")
+	snap.Timestamp = time.Date(2026, 8, 3, 12, 0, 0, 0, time.Local)
+	snap.Metrics["codex_credit_limit"] = core.Metric{Limit: &limit, Used: &used, Unit: "credits"}
+	p.applyCreditForecast(&snap, "test")
+
+	if snap.Raw["credit_forecast_source"] != "observed_usage" {
+		t.Fatalf("forecast source = %q, want observed_usage", snap.Raw["credit_forecast_source"])
+	}
+	rate := snap.Metrics["codex_credit_burn_rate"]
+	if rate.Used == nil {
+		t.Fatal("expected an observed burn rate from samples collected during the daily path")
+	}
+	// 100 -> 500 credits across two hours.
+	if *rate.Used < 199.9 || *rate.Used > 200.1 {
+		t.Fatalf("observed rate = %v, want about 200 credits/hour", rate.Used)
+	}
+}

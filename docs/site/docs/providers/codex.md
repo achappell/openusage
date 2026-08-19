@@ -143,6 +143,12 @@ On a ChatGPT subscription plan (Plus, Pro, Team, Enterprise) the dollar number i
 ### How fresh is the data?
 
 - Polling: every 30 s by default. JSONL files are re-parsed when their mtime/size changes; otherwise served from cache.
+- Daily account-credit endpoint: cached in memory per account, with the window driven by the endpoint's own `data_freshness_ts`. Only the historical days of a cached response can go stale — today's total is re-derived from the live cumulative quota on every poll — so the cache asks one question: has the freshness stamp reached the start of today?
+  - **Settled** (stamp is at or past today's start, so every earlier day is final): held for 1 hour. The expiry is only a hedge against server-side backfill.
+  - **Pending** (the endpoint has not finalised yesterday yet): retried after 5 minutes, so a lagging historical day cannot stay latched and skew the forecast.
+  - **Unknown** (no usable `data_freshness_ts` in the response): 15 minutes.
+- Daily-endpoint failures are cached too, so a rejected token is not retried on every poll: 30 minutes after a `401`/`403`, 2 minutes after any other failure. The error stays visible in `credit_daily_usage_error` throughout.
+- A `200` carrying no usage rows is treated as "no daily history available", not as authoritative account history: the forecast falls back to the elapsed-time estimate and records a `credit_daily_usage` diagnostic rather than claiming `account_daily_history`.
 - Hook (when integration is installed): real-time per turn.
 
 ## API endpoints used
