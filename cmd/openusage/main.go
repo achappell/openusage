@@ -53,7 +53,7 @@ func main() {
 	root.AddCommand(newAntigravityCommand())
 	root.AddCommand(newStatuslineCommand())
 	root.AddCommand(newTmuxCommand())
-	root.AddCommand(newSketchybarCommand())
+	root.AddCommand(newSketchybarCommand(cfg))
 	for _, c := range newReportCommands() {
 		root.AddCommand(c)
 	}

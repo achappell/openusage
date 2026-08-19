@@ -7,6 +7,7 @@ OPENUSAGE_BIN="${OPENUSAGE_BIN:-openusage}"
 CACHE_DIR="${OPENUSAGE_SKETCHYBAR_CACHE_DIR:-$HOME/.cache/openusage/sketchybar}"
 ACTIVE_CACHE="$CACHE_DIR/active.json"
 STALE_AFTER="${OPENUSAGE_SKETCHYBAR_STALE_AFTER:-600}"
+TRIGGER="${OPENUSAGE_SKETCHYBAR_USAGE_TRIGGER:-click}"
 
 file_mtime() {
   stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0\n'
@@ -25,6 +26,26 @@ quota_bearing() {
   jq -e 'type == "object" and .status == "ok" and (.label // "") != "quota unavailable"' >/dev/null 2>&1
 }
 
+close_popups() {
+  local helper="$HOME/.config/sketchybar/plugins/popup_close.sh"
+  [ -n "$CONFIG_DIR" ] && helper="$CONFIG_DIR/plugins/popup_close.sh"
+  [ -n "$OPENUSAGE_SKETCHYBAR_CLOSE_SCRIPT" ] && helper="$OPENUSAGE_SKETCHYBAR_CLOSE_SCRIPT"
+  if [ -x "$helper" ]; then
+    "$helper" >/dev/null 2>&1
+  else
+    sketchybar --set ai popup.drawing=off >/dev/null 2>&1
+    sketchybar --set ai_switcher popup.drawing=off >/dev/null 2>&1
+  fi
+}
+
+open_popup() {
+  if [ "${NAME:-ai}" != "ai" ]; then
+    exit 0
+  fi
+  close_popups
+  exec "$SCRIPT_DIR/usage-popup.sh"
+}
+
 paint() {
   local text="$1"
   local color="$2"
@@ -33,21 +54,34 @@ paint() {
     label="$text" label.color="$color"
 }
 
-case "${SENDER:-}" in
-  mouse.entered)
-    # A mouse-enter event can be dispatched with the event target in NAME.
-    # Never let a neighbouring item (the provider switcher) open this popup.
-    if [ "${NAME:-ai}" != "ai" ]; then
-      sketchybar --set ai popup.drawing=off >/dev/null 2>&1
-      exit 0
-    fi
-    exec "$SCRIPT_DIR/usage-popup.sh"
+case "$TRIGGER" in
+  hover)
+    case "${SENDER:-}" in
+      mouse.entered)
+        open_popup
+        ;;
+      mouse.exited|mouse.exited.global)
+        close_popups
+        exit 0
+        ;;
+    esac
     ;;
-  mouse.exited|mouse.exited.global)
-    # Close the owning popup explicitly; NAME may describe the event target.
-    sketchybar --set ai popup.drawing=off
-    sketchybar --set ai_switcher popup.drawing=off >/dev/null 2>&1
-    exit 0
+  *)
+    case "${SENDER:-}" in
+      mouse.clicked)
+        # Never let a neighbouring item open this popup if SketchyBar reports
+        # a surprising event target.
+        if [ "${NAME:-ai}" != "ai" ]; then
+          exit 0
+        fi
+        popup_state=$(sketchybar --query ai 2>/dev/null | jq -r '.popup.drawing // "off"')
+        if [ "$popup_state" = "on" ]; then
+          close_popups
+          exit 0
+        fi
+        open_popup
+        ;;
+    esac
     ;;
 esac
 

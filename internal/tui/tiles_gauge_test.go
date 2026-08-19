@@ -289,6 +289,31 @@ func TestTileGaugeProjectionAnnotation_CodexCredits(t *testing.T) {
 	}
 }
 
+func TestTileGaugeProjectionAnnotation_CodexCreditsUsesDailyProjection(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	usedPct := 36.0
+	limit := 7500.0
+	rate := 7.73
+	projected := 5000.0
+	creditPct := core.Metric{Used: &usedPct, Limit: core.Float64Ptr(100), Unit: "%", Window: "current-period"}
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"codex_credit_percent_used":               creditPct,
+			"codex_credit_limit":                      {Used: &limit, Limit: &limit, Unit: "credits", Window: "current-period"},
+			"codex_credit_burn_rate":                  {Used: &rate, Unit: "credits/hour", Window: "current-period average"},
+			"codex_credit_projected_credits_at_reset": {Used: &projected, Unit: "credits", Window: "at reset"},
+		},
+		Resets: map[string]time.Time{
+			"codex_credit_limit": now.Add(16*24*time.Hour + 12*time.Hour),
+		},
+	}
+
+	out := tileGaugeProjectionAnnotation(snap, "codex_credit_percent_used", creditPct, usedPct, now)
+	if !strings.Contains(out, "~67% by reset") {
+		t.Errorf("expected account daily projection to drive reset percentage, got %q", out)
+	}
+}
+
 func TestTileGaugeProjectionAnnotation_CodexPersonalCap(t *testing.T) {
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	usedPct := 80.0

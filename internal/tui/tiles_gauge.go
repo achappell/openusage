@@ -305,6 +305,20 @@ func tileCodexCreditProjectionAnnotation(snap core.UsageSnapshot, usedPct float6
 
 	rateMetric, hasRate := snap.Metrics["codex_credit_burn_rate"]
 	creditMetric, hasCredits := snap.Metrics["codex_credit_limit"]
+	projectedMetric, hasProjected := snap.Metrics["codex_credit_projected_credits_at_reset"]
+	if hasProjected && projectedMetric.Used != nil && creditMetric.Limit != nil && *creditMetric.Limit > 0 && resetIn > 0 {
+		projectedPct := *projectedMetric.Used / *creditMetric.Limit * 100
+		if projectedPct < 100 {
+			projected := int(math.Round(projectedPct))
+			if projected < 0 {
+				projected = 0
+			}
+			if projected >= 100 {
+				projected = 99
+			}
+			return joinAnnotationParts(capPart, resetPart, fmt.Sprintf("~%d%% by reset", projected))
+		}
+	}
 	if !hasRate || !hasCredits || rateMetric.Used == nil || creditMetric.Limit == nil || *rateMetric.Used <= 0 || *creditMetric.Limit <= 0 || usedPct >= 100 {
 		return joinAnnotationParts(capPart, resetPart)
 	}

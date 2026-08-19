@@ -233,15 +233,9 @@ func replaceBlock(existing []byte, block string) []byte {
 	if end < len(existing) && existing[end] == '\n' {
 		end++
 	}
-	cleaned := append([]byte{}, existing[:start]...)
-	cleaned = append(cleaned, existing[end:]...)
-	if len(cleaned) > 0 && !bytes.HasSuffix(cleaned, []byte("\n")) {
-		cleaned = append(cleaned, '\n')
-	}
-	if len(cleaned) > 0 && !bytes.HasSuffix(cleaned, []byte("\n\n")) {
-		cleaned = append(cleaned, '\n')
-	}
-	return append(cleaned, []byte(block)...)
+	updated := append([]byte{}, existing[:start]...)
+	updated = append(updated, []byte(block)...)
+	return append(updated, existing[end:]...)
 }
 
 func removeBlock(existing []byte) []byte {

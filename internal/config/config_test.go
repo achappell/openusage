@@ -56,6 +56,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Hub.ListenAddr != "" {
 		t.Errorf("default hub.listen_addr should be empty (runtime default applied later), got %q", cfg.Hub.ListenAddr)
 	}
+	if cfg.SketchyBar.UsageTrigger != SketchyBarTriggerClick {
+		t.Errorf("default sketchybar.usage_trigger = %q, want %q", cfg.SketchyBar.UsageTrigger, SketchyBarTriggerClick)
+	}
+	if cfg.SketchyBar.SwitcherTrigger != SketchyBarTriggerClick {
+		t.Errorf("default sketchybar.switcher_trigger = %q, want %q", cfg.SketchyBar.SwitcherTrigger, SketchyBarTriggerClick)
+	}
 }
 
 func TestLoadFrom_MissingFile(t *testing.T) {
@@ -117,6 +123,22 @@ func TestLoadFrom_ValidFile(t *testing.T) {
 	}
 	if cfg.Accounts[0].ID != "openai-test" {
 		t.Errorf("first account ID = %s, want openai-test", cfg.Accounts[0].ID)
+	}
+}
+
+func TestLoadFrom_SketchyBarTriggersNormalize(t *testing.T) {
+	cfg := loadConfigJSON(t, `{
+  "sketchybar": {
+    "usage_trigger": " HOVER ",
+    "switcher_trigger": "not-a-trigger"
+  }
+}`)
+
+	if cfg.SketchyBar.UsageTrigger != SketchyBarTriggerHover {
+		t.Errorf("usage_trigger = %q, want %q", cfg.SketchyBar.UsageTrigger, SketchyBarTriggerHover)
+	}
+	if cfg.SketchyBar.SwitcherTrigger != SketchyBarTriggerClick {
+		t.Errorf("switcher_trigger = %q, want %q for invalid input", cfg.SketchyBar.SwitcherTrigger, SketchyBarTriggerClick)
 	}
 }
 

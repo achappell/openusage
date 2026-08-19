@@ -37,6 +37,12 @@ type Provider struct {
 	telemetryCache   map[string]*telemetryCacheEntry
 	creditHistoryMu  sync.Mutex
 	creditHistory    map[string][]creditUsageObservation
+	creditDailyMu    sync.Mutex
+	creditDaily      map[string]dailyCreditUsageCache
+	creditDailyFail  map[string]dailyCreditUsageFailure
+	// creditDailyNow is the clock used for daily-credit cache freshness.
+	// Tests swap it out to advance past the TTL deterministically.
+	creditDailyNow func() time.Time
 }
 
 type telemetryCacheEntry struct {
@@ -65,8 +71,11 @@ func New() *Provider {
 			},
 			Dashboard: dashboardWidget(),
 		}),
-		telemetryCache: make(map[string]*telemetryCacheEntry),
-		creditHistory:  make(map[string][]creditUsageObservation),
+		telemetryCache:  make(map[string]*telemetryCacheEntry),
+		creditHistory:   make(map[string][]creditUsageObservation),
+		creditDaily:     make(map[string]dailyCreditUsageCache),
+		creditDailyFail: make(map[string]dailyCreditUsageFailure),
+		creditDailyNow:  time.Now,
 	}
 }
 
@@ -291,6 +300,16 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Raw["split_error"] = err.Error()
 	}
 
+	// Read the CLI version before any network fetcher: they stamp it into
+	// their User-Agent, so reading it afterwards leaves that header bare.
+	versionFile := filepath.Join(configDir, "version.json")
+	if data, err := os.ReadFile(versionFile); err == nil {
+		var ver versionInfo
+		if json.Unmarshal(data, &ver) == nil && ver.LatestVersion != "" {
+			snap.Raw["cli_version"] = ver.LatestVersion
+		}
+	}
+
 	hasLiveData, liveErr := p.fetchLiveUsage(ctx, acct, configDir, &snap)
 	if liveErr != nil {
 		snap.Raw["quota_api_error"] = liveErr.Error()
@@ -300,13 +319,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if cliErr != nil {
 		snap.Raw["cli_rate_limits_error"] = cliErr.Error()
 	}
-
-	versionFile := filepath.Join(configDir, "version.json")
-	if data, err := os.ReadFile(versionFile); err == nil {
-		var ver versionInfo
-		if json.Unmarshal(data, &ver) == nil && ver.LatestVersion != "" {
-			snap.Raw["cli_version"] = ver.LatestVersion
-		}
+	if err := p.fetchDailyCreditUsage(ctx, acct, configDir, &snap); err != nil {
+		snap.Raw["credit_daily_usage_error"] = err.Error()
 	}
 
 	if acct.RuntimeHints != nil {
