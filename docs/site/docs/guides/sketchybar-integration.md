@@ -64,6 +64,70 @@ review it or paste it into a config by hand:
 openusage sketchybar
 ```
 
+## Choose click or hover
+
+:::caution The default changed
+Earlier versions always opened the usage popup on **hover**, with no way to
+configure it. Both items now default to **click**, so reinstalling the managed
+block changes how the usage popup behaves. Set `usage_trigger` to `"hover"` to
+keep the old behavior.
+:::
+
+The OpenUsage items read their interaction preferences from
+`~/.config/openusage/settings.json`. The default is click-to-toggle:
+
+```json
+{
+  "sketchybar": {
+    "usage_trigger": "click",
+    "switcher_trigger": "click"
+  }
+}
+```
+
+Set either value to `hover` if that item should open on pointer entry. The two
+items can use different gestures, and they close differently on purpose:
+
+- The **usage popup** is read-only, so it closes as soon as the pointer leaves
+  the item.
+- The **provider picker** is a menu you have to click, so it stays open until
+  the pointer leaves the bar entirely. Closing it on item exit would dismiss it
+  while you were still reaching for a row.
+
+After editing the file, regenerate the managed block and reload the bar:
+
+```bash
+openusage sketchybar install --write
+sketchybar --reload
+```
+
+Editing `settings.json` does not rewrite the already-generated scripts, so
+`openusage sketchybar doctor` compares the configured gesture against the one
+baked into each installed script and warns when they have drifted apart. Both
+gestures can also be set per-invocation:
+
+```bash
+openusage sketchybar install --write --usage-trigger hover --switcher-trigger click
+```
+
+### Closing popups
+
+When either item needs to dismiss a popup it first looks for a close helper,
+falling back to closing its own two popups directly. The helper is resolved in
+this order:
+
+1. `$OPENUSAGE_SKETCHYBAR_CLOSE_SCRIPT`, if set and executable.
+2. `$CONFIG_DIR/plugins/popup_close.sh`, if executable — `CONFIG_DIR` is
+   exported by SketchyBar itself.
+3. `~/.config/sketchybar/plugins/popup_close.sh`, if executable.
+
+The `popup_close.sh` convention comes from the common SketchyBar starter
+configs, where it closes every popup on the bar. If you already have one,
+OpenUsage will use it, which is usually what you want — picking an OpenUsage
+item should dismiss your other popups too. Point
+`OPENUSAGE_SKETCHYBAR_CLOSE_SCRIPT` somewhere else, or at a no-op script, if
+you would rather OpenUsage did not call it.
+
 ## Full managed snippet
 
 Run the installer once so the three scripts exist, then this is the complete
@@ -82,11 +146,13 @@ OPENUSAGE_SKETCHYBAR_WARN_COLOR='0xffeed49f'
 OPENUSAGE_SKETCHYBAR_BAD_COLOR='0xffed8796'
 OPENUSAGE_SKETCHYBAR_UNKNOWN_COLOR='0xffcad3f5'
 OPENUSAGE_SKETCHYBAR_TEXT_COLOR='0xffcad3f5'
-export OPENUSAGE_SKETCHYBAR_DIR OPENUSAGE_BIN OPENUSAGE_SKETCHYBAR_CACHE_DIR
+OPENUSAGE_SKETCHYBAR_USAGE_TRIGGER='click'
+OPENUSAGE_SKETCHYBAR_SWITCHER_TRIGGER='click'
+export OPENUSAGE_SKETCHYBAR_DIR OPENUSAGE_BIN OPENUSAGE_SKETCHYBAR_CACHE_DIR OPENUSAGE_SKETCHYBAR_USAGE_TRIGGER OPENUSAGE_SKETCHYBAR_SWITCHER_TRIGGER
 export OPENUSAGE_SKETCHYBAR_ICON OPENUSAGE_SKETCHYBAR_GOOD_COLOR OPENUSAGE_SKETCHYBAR_WARN_COLOR OPENUSAGE_SKETCHYBAR_BAD_COLOR OPENUSAGE_SKETCHYBAR_UNKNOWN_COLOR OPENUSAGE_SKETCHYBAR_TEXT_COLOR
 sketchybar --add item 'ai' 'right' >/dev/null 2>&1 || true
-sketchybar --subscribe 'ai' mouse.entered mouse.exited mouse.exited.global
-sketchybar --set 'ai' update_freq=60 padding_left=10 popup.background.color='0xff1e2030' popup.background.border_color='0xff494d64' popup.background.border_width=2 popup.background.corner_radius=6 popup.align=right popup.y_offset=2 script="$OPENUSAGE_SKETCHYBAR_DIR/ai-usage.sh"
+sketchybar --subscribe 'ai' mouse.clicked
+sketchybar --set 'ai' update_freq=60 padding_left=10 popup.drawing=off popup.background.color='0xff1e2030' popup.background.border_color='0xff494d64' popup.background.border_width=2 popup.background.corner_radius=6 popup.align=right popup.y_offset=2 script="$OPENUSAGE_SKETCHYBAR_DIR/ai-usage.sh"
 sketchybar --add item 'ai_switcher' 'right' >/dev/null 2>&1 || true
 sketchybar --subscribe 'ai_switcher' mouse.clicked
 sketchybar --set 'ai_switcher' padding_left=2 padding_right=2 icon='⇄' icon.font="Hack Nerd Font:Regular:13.0" icon.color='0xffcad3f5' label.drawing=off popup.drawing=off popup.background.color='0xff1e2030' popup.background.border_color='0xff494d64' popup.background.border_width=2 popup.background.corner_radius=6 popup.horizontal=on popup.align=right popup.y_offset=2 script="$OPENUSAGE_SKETCHYBAR_DIR/provider-select.sh"
@@ -94,10 +160,10 @@ sketchybar --update
 # <<< openusage sketchybar <<<
 ```
 
-The two items use different gestures on purpose. The `ai` item opens its
-detail popup on **hover** (`mouse.entered`), while the `ai_switcher` item opens
-the provider picker on **click** (`mouse.clicked`) and closes it on a second
-click — a menu you are choosing from should not vanish when the pointer drifts.
+Both items use deliberate click behavior. The `ai` item opens its detail popup
+on **click** (`mouse.clicked`) and closes it on a second click; the
+`ai_switcher` item opens the provider picker on the same event and also closes
+it on a second click. Hovering over either item is inert.
 
 The switcher script uses the stable `provider:account` key from
 `openusage active list --json`, so account labels and display text are never
@@ -163,6 +229,16 @@ another provider records a newer user-activity event.
 openusage sketchybar doctor
 openusage sketchybar uninstall
 sketchybar --reload
+```
+
+`doctor` reports whether the managed block is present, whether the three
+generated scripts exist and are executable, whether the `openusage` and
+`sketchybar` binaries resolve, and whether the installed click/hover gestures
+still match `settings.json`:
+
+```
+[ OK ] trigger: usage=click in ai-usage.sh
+[WARN] trigger: provider-select.sh is installed click but configured hover — run `openusage sketchybar install --write` and reload
 ```
 
 Uninstall removes the sentinel block and leaves the neutral generated scripts

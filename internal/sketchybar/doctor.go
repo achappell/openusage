@@ -49,6 +49,9 @@ func Doctor(out io.Writer, opts DoctorOptions) error {
 				fmt.Fprintf(out, "[ OK ] generated script: %s\n", path)
 			}
 		}
+
+		checkTriggerDrift(out, dataDir, "ai-usage.sh", "OPENUSAGE_SKETCHYBAR_USAGE_TRIGGER", "usage", opts.UsageTrigger)
+		checkTriggerDrift(out, dataDir, "provider-select.sh", "OPENUSAGE_SKETCHYBAR_SWITCHER_TRIGGER", "switcher", opts.SwitcherTrigger)
 	}
 
 	checkBinary(out, "openusage", opts.Binary)
@@ -77,4 +80,47 @@ func checkBinary(out io.Writer, name, override string) {
 		return
 	}
 	fmt.Fprintf(out, "[ OK ] %s: %s\n", name, path)
+}
+
+// checkTriggerDrift compares the gesture baked into an installed script
+// against the configured one. Editing settings.json does not rewrite the
+// generated scripts, so without this the bar keeps honouring the old gesture
+// while doctor reports all-clear — and doctor is what people run when the
+// popup misbehaves.
+func checkTriggerDrift(out io.Writer, dataDir, script, envVar, label, configured string) {
+	configured = normalizeTrigger(configured)
+	path := filepath.Join(dataDir, script)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // the missing-script check above already reported this
+	}
+	installed, ok := scriptTrigger(string(data), envVar)
+	if !ok {
+		fmt.Fprintf(out, "[WARN] trigger: %s has no %s (reinstall with `openusage sketchybar install --write`)\n", script, envVar)
+		return
+	}
+	if installed == configured {
+		fmt.Fprintf(out, "[ OK ] trigger: %s=%s in %s\n", label, installed, script)
+		return
+	}
+	fmt.Fprintf(out, "[WARN] trigger: %s is installed %s but configured %s — run `openusage sketchybar install --write` and reload\n",
+		script, installed, configured)
+}
+
+// scriptTrigger reads `ENVVAR='value'` out of an installed script header.
+func scriptTrigger(script, envVar string) (string, bool) {
+	for _, line := range strings.Split(script, "\n") {
+		line = strings.TrimSpace(line)
+		rest, found := strings.CutPrefix(line, envVar+"=")
+		if !found {
+			continue
+		}
+		rest = strings.TrimSpace(rest)
+		rest = strings.TrimSuffix(strings.TrimPrefix(rest, "'"), "'")
+		if rest == "" {
+			return "", false
+		}
+		return normalizeTrigger(rest), true
+	}
+	return "", false
 }

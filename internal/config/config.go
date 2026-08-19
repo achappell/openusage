@@ -200,6 +200,20 @@ type TmuxAlerts struct {
 	Mode                  string  `json:"mode,omitempty"` // message|bell|both|none
 }
 
+const (
+	SketchyBarTriggerClick = "click"
+	SketchyBarTriggerHover = "hover"
+)
+
+// SketchyBarConfig controls mouse interaction for OpenUsage's generated
+// SketchyBar items. Values are intentionally user-facing rather than raw
+// SketchyBar event names so the generated subscription and script behavior
+// cannot drift apart.
+type SketchyBarConfig struct {
+	UsageTrigger    string `json:"usage_trigger,omitempty"`
+	SwitcherTrigger string `json:"switcher_trigger,omitempty"`
+}
+
 type Config struct {
 	UI                   UIConfig                      `json:"ui"`
 	Theme                string                        `json:"theme"`
@@ -215,6 +229,7 @@ type Config struct {
 	Export               ExportConfig                  `json:"export,omitempty"`
 	Hub                  HubConfig                     `json:"hub,omitempty"`
 	Tmux                 TmuxConfig                    `json:"tmux,omitempty"`
+	SketchyBar           SketchyBarConfig              `json:"sketchybar,omitempty"`
 }
 
 // DefaultProviderLinks returns built-in telemetry provider-id to dashboard provider-id mappings.
@@ -251,6 +266,10 @@ func DefaultConfig() Config {
 		Telemetry:          TelemetryConfig{ProviderLinks: map[string]string{}},
 		Dashboard:          DashboardConfig{View: DashboardViewGrid},
 		ModelNormalization: core.DefaultModelNormalizationConfig(),
+		SketchyBar: SketchyBarConfig{
+			UsageTrigger:    SketchyBarTriggerClick,
+			SwitcherTrigger: SketchyBarTriggerClick,
+		},
 	}
 }
 
@@ -291,6 +310,7 @@ func LoadFrom(path string) (Config, error) {
 	cfg.Data = normalizeDataConfig(cfg.Data)
 	cfg.ModelNormalization = core.NormalizeModelNormalizationConfig(cfg.ModelNormalization)
 	cfg.Telemetry = normalizeTelemetryConfig(cfg.Telemetry)
+	cfg.SketchyBar = normalizeSketchyBarConfig(cfg.SketchyBar)
 	cfg.Accounts = normalizeAccounts(cfg.Accounts)
 	cfg.AutoDetectedAccounts = normalizeAccounts(cfg.AutoDetectedAccounts)
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
@@ -409,6 +429,22 @@ func normalizeTelemetryConfig(in TelemetryConfig) TelemetryConfig {
 		out.ProviderLinks[source] = target
 	}
 	return out
+}
+
+func normalizeSketchyBarConfig(in SketchyBarConfig) SketchyBarConfig {
+	return SketchyBarConfig{
+		UsageTrigger:    normalizeSketchyBarTrigger(in.UsageTrigger),
+		SwitcherTrigger: normalizeSketchyBarTrigger(in.SwitcherTrigger),
+	}
+}
+
+func normalizeSketchyBarTrigger(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case SketchyBarTriggerHover:
+		return SketchyBarTriggerHover
+	default:
+		return SketchyBarTriggerClick
+	}
 }
 
 func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProviderConfig {

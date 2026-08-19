@@ -24,6 +24,9 @@ OpenUsage reads two kinds of environment variables: **runtime overrides** (debug
 | `XDG_STATE_HOME` | Override the state base directory (telemetry db/socket/spools). Default `~/.local/state` on Linux/macOS; on Windows the state dir is `%APPDATA%\openusage\state` when this is unset. |
 | `CLAUDE_SETTINGS_FILE` | Override the path to `~/.claude/settings.json`. Used by the `claude_code` provider and integration. |
 | `CODEX_CONFIG_DIR` | Override the path to `~/.codex/`. Used by the `codex` provider and integration. |
+| `OPENUSAGE_SKETCHYBAR_CLOSE_SCRIPT` | Path to a script the generated SketchyBar items run instead of closing their own popups. See [SketchyBar integration](../guides/sketchybar-integration.md#closing-popups). |
+| `OPENUSAGE_SKETCHYBAR_STALE_AFTER` | Seconds before the cached SketchyBar usage payload is treated as stale. Default `600`. |
+| `OPENUSAGE_SKETCHYBAR_CACHE_DIR` | Override the SketchyBar cache directory. Default `~/.cache/openusage/sketchybar`. |
 | `CODEBUFF_DATA_DIR` | Additional channel root for the `codebuff` provider, appended to the default `manicode/`, `manicode-dev/`, and `manicode-staging/` channels under `~/.config/`. |
 
 ## API key environment variables

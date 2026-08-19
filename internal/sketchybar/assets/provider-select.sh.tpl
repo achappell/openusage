@@ -6,18 +6,51 @@ OPENUSAGE_BIN="${OPENUSAGE_BIN:-openusage}"
 CACHE_DIR="${OPENUSAGE_SKETCHYBAR_CACHE_DIR:-$HOME/.cache/openusage/sketchybar}"
 LIST_CACHE="$CACHE_DIR/list.json"
 SWITCHER="${NAME:-ai_switcher}"
+TRIGGER="${OPENUSAGE_SKETCHYBAR_SWITCHER_TRIGGER:-click}"
+
+close_popups() {
+  local helper="$HOME/.config/sketchybar/plugins/popup_close.sh"
+  [ -n "$CONFIG_DIR" ] && helper="$CONFIG_DIR/plugins/popup_close.sh"
+  [ -n "$OPENUSAGE_SKETCHYBAR_CLOSE_SCRIPT" ] && helper="$OPENUSAGE_SKETCHYBAR_CLOSE_SCRIPT"
+  if [ -x "$helper" ]; then
+    "$helper" >/dev/null 2>&1
+  else
+    sketchybar --set ai popup.drawing=off >/dev/null 2>&1
+    sketchybar --set ai_switcher popup.drawing=off >/dev/null 2>&1
+  fi
+}
 
 if [ -z "${1:-}" ]; then
-  # The picker is deliberately click-driven. Ignore a stale hover
-  # subscription from an older install and never resurrect a dismissed menu.
-  if [ "${SENDER:-}" != "mouse.clicked" ]; then
-    exit 0
-  fi
-  popup_state=$(sketchybar --query "$SWITCHER" 2>/dev/null | jq -r '.popup.drawing // "off"')
-  if [ "$popup_state" = "on" ]; then
-    sketchybar --set "$SWITCHER" popup.drawing=off >/dev/null 2>&1
-    exit 0
-  fi
+  case "$TRIGGER" in
+    hover)
+      case "${SENDER:-}" in
+        mouse.entered)
+          close_popups
+          ;;
+        # Only the bar-scoped exit closes the picker. mouse.exited fires when
+        # the pointer leaves this item, which includes moving down into this
+        # very popup, so acting on it would dismiss the menu mid-reach.
+        mouse.exited.global)
+          close_popups
+          exit 0
+          ;;
+        *)
+          exit 0
+          ;;
+      esac
+      ;;
+    *)
+      if [ "${SENDER:-}" != "mouse.clicked" ]; then
+        exit 0
+      fi
+      popup_state=$(sketchybar --query "$SWITCHER" 2>/dev/null | jq -r '.popup.drawing // "off"')
+      if [ "$popup_state" = "on" ]; then
+        close_popups
+        exit 0
+      fi
+      close_popups
+      ;;
+  esac
 fi
 
 if [ "${1:-}" = "--auto" ]; then
@@ -28,7 +61,10 @@ fi
 
 if [ -n "${1:-}" ]; then
   NAME=ai SENDER=forced "$SCRIPT_DIR/ai-usage.sh" >/dev/null 2>&1
-  sketchybar --set "$SWITCHER" popup.drawing=off >/dev/null 2>&1
+  # Close by explicit item name, not via $SWITCHER: this path runs as a row's
+  # click_script, so NAME is the clicked row rather than the picker, and a
+  # --set against it would silently leave the menu open.
+  close_popups
   exit 0
 fi
 

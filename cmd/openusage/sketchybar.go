@@ -6,13 +6,21 @@ import (
 	"os"
 	"strings"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/spf13/cobra"
 
 	"github.com/janekbaraniewski/openusage/internal/sketchybar"
 )
 
-func newSketchybarCommand() *cobra.Command {
-	opts := sketchybar.InstallOptions{}
+func newSketchybarCommand(configs ...config.Config) *cobra.Command {
+	cfg := config.DefaultConfig()
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
+	opts := sketchybar.InstallOptions{
+		UsageTrigger:    cfg.SketchyBar.UsageTrigger,
+		SwitcherTrigger: cfg.SketchyBar.SwitcherTrigger,
+	}
 
 	cmd := &cobra.Command{
 		Use:   "sketchybar",
@@ -34,6 +42,8 @@ With no subcommand, print the complete copy-pasteable managed block. Use
 	fl.StringVar(&opts.Binary, "binary", "", "override the openusage binary path used by generated scripts")
 	fl.StringVar(&opts.ConfigPath, "config", "", "override the sketchybarrc path")
 	fl.StringVar(&opts.DataDir, "data-dir", "", "override the neutral generated-script directory")
+	fl.StringVar(&opts.UsageTrigger, "usage-trigger", opts.UsageTrigger, "gesture that opens the usage popup (click|hover)")
+	fl.StringVar(&opts.SwitcherTrigger, "switcher-trigger", opts.SwitcherTrigger, "gesture that opens the provider picker (click|hover)")
 	fl.BoolVar(&opts.Write, "write", false, "apply the managed block and generated scripts")
 
 	install := &cobra.Command{
@@ -62,9 +72,11 @@ run without arguments.`,
 		Short: "Check SketchyBar config, scripts, and executables",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return sketchybar.Doctor(os.Stdout, sketchybar.DoctorOptions{
-				ConfigPath: opts.ConfigPath,
-				DataDir:    opts.DataDir,
-				Binary:     opts.Binary,
+				ConfigPath:      opts.ConfigPath,
+				DataDir:         opts.DataDir,
+				Binary:          opts.Binary,
+				UsageTrigger:    opts.UsageTrigger,
+				SwitcherTrigger: opts.SwitcherTrigger,
 			})
 		},
 	}

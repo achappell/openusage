@@ -48,12 +48,14 @@ type Preset struct {
 // InstallOptions controls rendering and installation. Write=false prints a
 // complete managed block; Write=true writes the block and embedded scripts.
 type InstallOptions struct {
-	Write      bool
-	Preset     string
-	Binary     string
-	ConfigPath string
-	DataDir    string
-	Now        time.Time
+	Write           bool
+	Preset          string
+	Binary          string
+	ConfigPath      string
+	DataDir         string
+	UsageTrigger    string
+	SwitcherTrigger string
+	Now             time.Time
 }
 
 // DoctorOptions controls the live checks emitted by Doctor.
@@ -62,4 +64,10 @@ type DoctorOptions struct {
 	DataDir    string
 	Binary     string
 	Sketchybar string
+	// UsageTrigger and SwitcherTrigger are the currently configured
+	// gestures. Doctor compares them against the values baked into the
+	// installed scripts so an edited config that was never reinstalled is
+	// reported rather than silently ignored.
+	UsageTrigger    string
+	SwitcherTrigger string
 }
