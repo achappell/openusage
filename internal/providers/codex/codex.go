@@ -37,6 +37,8 @@ type Provider struct {
 	telemetryCache   map[string]*telemetryCacheEntry
 	creditHistoryMu  sync.Mutex
 	creditHistory    map[string][]creditUsageObservation
+	creditDailyMu    sync.Mutex
+	creditDaily      map[string]dailyCreditUsageCache
 }
 
 type telemetryCacheEntry struct {
@@ -67,6 +69,7 @@ func New() *Provider {
 		}),
 		telemetryCache: make(map[string]*telemetryCacheEntry),
 		creditHistory:  make(map[string][]creditUsageObservation),
+		creditDaily:    make(map[string]dailyCreditUsageCache),
 	}
 }
 
@@ -299,6 +302,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	hasCLIData, cliErr := p.fetchCLIRateLimits(ctx, acct, configDir, &snap)
 	if cliErr != nil {
 		snap.Raw["cli_rate_limits_error"] = cliErr.Error()
+	}
+	if err := p.fetchDailyCreditUsage(ctx, acct, configDir, &snap); err != nil {
+		snap.Raw["credit_daily_usage_error"] = err.Error()
 	}
 
 	versionFile := filepath.Join(configDir, "version.json")

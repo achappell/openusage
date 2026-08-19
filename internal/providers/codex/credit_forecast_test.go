@@ -184,6 +184,32 @@ func TestApplyCreditForecastUsesInferredMonthlyStart(t *testing.T) {
 	}
 }
 
+func TestApplyCreditForecastProjectsZeroUsageReserveWithoutDailyHistory(t *testing.T) {
+	observedAt := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	resetAt := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+
+	snap := core.NewUsageSnapshot("codex", "test")
+	snap.Timestamp = observedAt
+	applyCreditLimitDetails(&creditLimitDetails{
+		Limit:    "7500",
+		Used:     "0",
+		ResetsAt: float64(resetAt.Unix()),
+	}, &snap, "cli")
+	New().applyCreditForecast(&snap, "test")
+
+	projected := snap.Metrics["codex_credit_projected_credits_at_reset"]
+	if projected.Used == nil || *projected.Used != 0 {
+		t.Fatalf("expected zero projected credits, got %v", projected.Used)
+	}
+	reserve := snap.Metrics["codex_credit_projected_reserve_at_reset"]
+	if reserve.Used == nil || *reserve.Used != 7500 {
+		t.Fatalf("expected full projected reserve, got %v", reserve.Used)
+	}
+	if snap.Raw["credit_forecast_source"] != "inferred_period_start" {
+		t.Fatalf("expected inferred forecast source, got %q", snap.Raw["credit_forecast_source"])
+	}
+}
+
 func TestApplyCreditForecastResetsAfterQuotaReset(t *testing.T) {
 	p := New()
 	start := time.Date(2026, 7, 15, 11, 0, 0, 0, time.UTC)

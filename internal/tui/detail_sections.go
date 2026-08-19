@@ -461,6 +461,26 @@ func buildDetailCodexCreditForecastSection(snap core.UsageSnapshot, innerW int) 
 			fmt.Sprintf("%s credits/hour", formatNumber(*rateMetric.Used)), innerW))
 	}
 
+	if dailyAverage, ok := snap.Metrics["codex_credit_daily_average"]; ok && dailyAverage.Used != nil && *dailyAverage.Used > 0 {
+		lines = append(lines, renderDotLeaderRow("Daily Average",
+			fmt.Sprintf("%s credits/day", formatNumber(*dailyAverage.Used)), innerW))
+	}
+
+	if projected, ok := snap.Metrics["codex_credit_projected_credits_at_reset"]; ok && projected.Used != nil {
+		lines = append(lines, renderDotLeaderRow("Expected at Reset",
+			fmt.Sprintf("%s credits", formatNumber(*projected.Used)), innerW))
+	}
+	if reserve, ok := snap.Metrics["codex_credit_projected_reserve_at_reset"]; ok && reserve.Used != nil {
+		label := "Projected Reserve"
+		value := *reserve.Used
+		if value < 0 {
+			label = "Projected Deficit"
+			value = math.Abs(value)
+		}
+		lines = append(lines, renderDotLeaderRow(label,
+			fmt.Sprintf("%s credits", formatNumber(value)), innerW))
+	}
+
 	if runoutMetric, ok := snap.Metrics["codex_credit_runout_hours"]; ok && runoutMetric.Used != nil {
 		hours := *runoutMetric.Used
 		if hours >= 0 {
@@ -543,7 +563,8 @@ func buildDetailOtherMetrics(snap core.UsageSnapshot, widget core.DashboardWidge
 		"all_time_api_cost", "total_cost_usd", "window_cost", "monthly_spend",
 		"credit_balance", "spend_limit", "plan_spend", "plan_total_spend_usd",
 		"plan_limit_usd", "plan_percent_used", "individual_spend", "burn_rate",
-		"codex_credit_limit", "codex_credit_reported_limit", "codex_credit_percent_used", "codex_credit_burn_rate", "codex_credit_runout_hours"} {
+		"codex_credit_limit", "codex_credit_reported_limit", "codex_credit_percent_used", "codex_credit_burn_rate", "codex_credit_runout_hours",
+		"codex_credit_daily_average", "codex_credit_projected_credits_at_reset", "codex_credit_projected_reserve_at_reset"} {
 		skipKeys[ck] = true
 	}
 
