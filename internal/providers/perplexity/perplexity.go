@@ -22,11 +22,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/browsercookies"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
+
+// loadBrowserSession is a seam so tests can supply a session instead of reading
+// the developer's real browser cookie store, which on macOS blocks in a Keychain
+// prompt no test binary can answer.
+//
+// It deliberately reads the stored credential rather than calling
+// shared.LoadOrRefreshBrowserSession: that helper re-reads the live browser
+// cookie and rewrites the stored session on every poll, clobbering a sibling
+// account's session when two accounts share this provider's fixed cookie
+// domain but use different source browsers. Mirrors loadStoredSession in
+// internal/providers/opencode/provider.go.
+var loadBrowserSession = func(_ context.Context, acct core.AccountConfig, _ browsercookies.Reader) (config.BrowserSession, bool, error) {
+	return config.LoadSession(acct.ID)
+}
 
 const (
 	consoleBaseURL = "https://console.perplexity.ai"
@@ -78,14 +93,7 @@ func New() *Provider {
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
 
-	// Load directly from stored credentials rather than
-	// shared.LoadOrRefreshBrowserSession, which re-reads the live browser
-	// cookie and overwrites the stored session on every poll — clobbering a
-	// sibling account's session when two accounts share this provider's
-	// fixed cookie domain but use different source browsers. See the
-	// equivalent opencode fix (loadStoredSession in
-	// internal/providers/opencode/provider.go) for the bug this avoids.
-	session, ok, err := config.LoadSession(acct.ID)
+	session, ok, err := loadBrowserSession(ctx, acct, nil)
 	if err != nil || !ok || session.Value == "" {
 		snap.Status = core.StatusAuth
 		snap.Message = "browser session not configured — Settings → 5 KEYS → perplexity → Enter"
