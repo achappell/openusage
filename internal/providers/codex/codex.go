@@ -255,16 +255,10 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	snap := core.UsageSnapshot{
-		ProviderID:  p.ID(),
-		AccountID:   acct.ID,
-		Timestamp:   time.Now(),
-		Status:      core.StatusOK,
-		Metrics:     make(map[string]core.Metric),
-		Resets:      make(map[string]time.Time),
-		Raw:         make(map[string]string),
-		DailySeries: make(map[string][]core.TimePoint),
-	}
+	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
+	snap.Timestamp = time.Now()
+	snap.Status = core.StatusOK
+	ensureCodexSnapshotMaps(&snap)
 
 	configDir := acct.Hint("config_dir", "")
 	if configDir == "" {
@@ -296,9 +290,20 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if err := p.readDailySessionCounts(sessionsDir, &snap); err != nil {
 		snap.Raw["session_counts_error"] = err.Error()
 	}
-	if err := p.readSessionUsageBreakdowns(sessionsDir, &snap); err != nil {
-		snap.Raw["split_error"] = err.Error()
+	// The all-session breakdown is the expensive local operation. Keep it on
+	// an isolated snapshot so account/network fetches, especially daily credit
+	// history, do not wait for every JSONL file to be parsed first.
+	breakdownBase := core.NewUsageSnapshot(p.ID(), acct.ID)
+	breakdownBase.Timestamp = snap.Timestamp
+	ensureCodexSnapshotMaps(&breakdownBase)
+	// The breakdown emitter only needs the latest context window to derive its
+	// context percentage. Do not seed the worker with session quota metrics:
+	// the live/CLI paths may deliberately clear or replace those before the
+	// worker result is merged.
+	if metric, ok := snap.Metrics["context_window"]; ok {
+		breakdownBase.Metrics["context_window"] = metric
 	}
+	breakdownDone := startCodexSessionBreakdown(sessionsDir, breakdownBase, p.readSessionUsageBreakdowns)
 
 	// Read the CLI version before any network fetcher: they stamp it into
 	// their User-Agent, so reading it afterwards leaves that header bare.
@@ -319,8 +324,22 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if cliErr != nil {
 		snap.Raw["cli_rate_limits_error"] = cliErr.Error()
 	}
-	if err := p.fetchDailyCreditUsage(ctx, acct, configDir, &snap); err != nil {
-		snap.Raw["credit_daily_usage_error"] = err.Error()
+	// This request now has its own snapshot and goroutine. It can complete
+	// while the full session breakdown is still walking local history.
+	dailyCreditDone := startCodexDailyCreditFetch(ctx, acct, configDir, snap, p.fetchDailyCreditUsage)
+
+	breakdownResult := <-breakdownDone
+	if breakdownResult.err != nil {
+		snap.Raw["split_error"] = breakdownResult.err.Error()
+	} else {
+		mergeCodexSessionBreakdown(&snap, &breakdownResult.snapshot)
+	}
+
+	dailyCreditResult := <-dailyCreditDone
+	if dailyCreditResult.err != nil {
+		snap.Raw["credit_daily_usage_error"] = dailyCreditResult.err.Error()
+	} else {
+		mergeCodexDailyCreditSnapshot(&snap, &dailyCreditResult.snapshot)
 	}
 
 	if acct.RuntimeHints != nil {
