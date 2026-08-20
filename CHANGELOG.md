@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.26.3 (2026-08-20)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* Codex daily-credit forecasts + configurable SketchyBar triggers by @achappell in https://github.com/achappell/openusage/pull/14
+* perf(codex): decouple daily credit fetch from the all-session walk by @achappell in https://github.com/achappell/openusage/pull/16
+* Codex/push main commits 2026 08 20 by @achappell in https://github.com/achappell/openusage/pull/17
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.2...v0.26.3
+
 ## 0.26.2 (2026-08-18)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
