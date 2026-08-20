@@ -14,8 +14,17 @@ import (
 
 func newSketchybarCommand(configs ...config.Config) *cobra.Command {
 	cfg := config.DefaultConfig()
-	if len(configs) > 0 {
+	switch {
+	case len(configs) > 0:
 		cfg = configs[0]
+	default:
+		// Loaded here rather than in main: the trigger names are flag
+		// defaults, so they must be known at construction time, and an
+		// unreadable config must not stop unrelated subcommands from
+		// running. A failed load simply leaves the built-in defaults.
+		if loaded, err := config.Load(); err == nil {
+			cfg = loaded
+		}
 	}
 	opts := sketchybar.InstallOptions{
 		UsageTrigger:    cfg.SketchyBar.UsageTrigger,
