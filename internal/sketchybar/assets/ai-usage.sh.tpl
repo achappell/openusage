@@ -26,6 +26,34 @@ quota_bearing() {
   jq -e 'type == "object" and .status == "ok" and (.label // "") != "quota unavailable"' >/dev/null 2>&1
 }
 
+# Event-backed selection is still authoritative when its provider has no
+# quota reading. Do not let an older quota snapshot from another provider win
+# merely because the current provider's quota label is unavailable.
+event_backed() {
+  jq -e 'type == "object" and (.source == "events" or .source == "pinned")' >/dev/null 2>&1
+}
+
+# The active CLI has a bounded timeout and may return a local recency answer
+# just as the daemon finishes its read-model query. Retry once so the bar does
+# not mistake that timing race for authoritative local state.
+fetch_fresh_active() {
+  local candidate="" local_fallback="" attempt
+  for attempt in 1 2; do
+    candidate="$("$OPENUSAGE_BIN" active --json 2>/dev/null)" || candidate=""
+    if printf '%s\n' "$candidate" | parsable_active; then
+      if printf '%s\n' "$candidate" | quota_bearing ||
+         printf '%s\n' "$candidate" | event_backed; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+      local_fallback="$candidate"
+    fi
+    [ "$attempt" -lt 2 ] && sleep 0.25
+  done
+  [ -n "$local_fallback" ] && printf '%s\n' "$local_fallback"
+  [ -n "$local_fallback" ]
+}
+
 close_popups() {
   local helper="$HOME/.config/sketchybar/plugins/popup_close.sh"
   [ -n "$CONFIG_DIR" ] && helper="$CONFIG_DIR/plugins/popup_close.sh"
@@ -88,11 +116,12 @@ esac
 mkdir -p "$CACHE_DIR" 2>/dev/null
 payload=""
 fresh_payload=""
-if fresh_payload=$("$OPENUSAGE_BIN" active --json 2>/dev/null) &&
-   printf '%s\n' "$fresh_payload" | parsable_active; then
+if fresh_payload=$(fetch_fresh_active); then
   # Local recency fallback can be valid JSON but have no quota. Do not let
-  # that degraded answer overwrite the last live, quota-bearing snapshot.
-  if printf '%s\n' "$fresh_payload" | quota_bearing; then
+  # that degraded answer overwrite the last live, quota-bearing snapshot. A
+  # live event-backed answer remains authoritative even without quota data.
+  if printf '%s\n' "$fresh_payload" | quota_bearing ||
+     printf '%s\n' "$fresh_payload" | event_backed; then
     payload="$fresh_payload"
     tmp=$(mktemp "$CACHE_DIR/active.XXXXXX" 2>/dev/null) || tmp=""
     if [ -n "$tmp" ]; then

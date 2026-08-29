@@ -91,3 +91,35 @@ func TestMergeCodexSessionBreakdownPreservesRemoteQuota(t *testing.T) {
 		t.Fatalf("account daily series was overwritten: got %.1f, want 90", got)
 	}
 }
+
+func TestMergeCodexQuotaSnapshotUsesCLIFallbackWhenLiveIsUnavailable(t *testing.T) {
+	dst := core.NewUsageSnapshot("codex", "account")
+	ensureCodexSnapshotMaps(&dst)
+	used := 80.0
+	limit := 100.0
+	dst.Metrics["rate_limit_primary"] = core.Metric{Limit: &limit, Used: &used, Unit: "%", Window: "5h"}
+	dst.Raw["rate_limit_source"] = "session"
+
+	live := core.NewUsageSnapshot("codex", "account")
+	ensureCodexSnapshotMaps(&live)
+	live.Raw["rate_limit_source"] = "live_unavailable"
+	mergeCodexQuotaSnapshot(&dst, &live, true)
+	if _, ok := dst.Metrics["rate_limit_primary"]; ok {
+		t.Fatal("live-unavailable result should clear stale session rate limits")
+	}
+
+	cli := core.NewUsageSnapshot("codex", "account")
+	ensureCodexSnapshotMaps(&cli)
+	cliUsed := 20.0
+	cliLimit := 100.0
+	cli.Metrics["rate_limit_primary"] = core.Metric{Limit: &cliLimit, Used: &cliUsed, Unit: "%", Window: "5h"}
+	cli.Raw["rate_limit_source"] = "cli_rpc"
+	mergeCodexQuotaSnapshot(&dst, &cli, false)
+
+	if got := *dst.Metrics["rate_limit_primary"].Used; got != 20 {
+		t.Fatalf("CLI fallback used = %.1f, want 20", got)
+	}
+	if got := dst.Raw["rate_limit_source"]; got != "cli_rpc" {
+		t.Fatalf("rate_limit_source = %q, want cli_rpc", got)
+	}
+}

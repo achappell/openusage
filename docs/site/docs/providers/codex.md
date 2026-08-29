@@ -159,7 +159,7 @@ On a ChatGPT subscription plan (Plus, Pro, Team, Enterprise) the dollar number i
   - Headers: `Authorization: Bearer <auth.json access_token>` and `ChatGPT-Account-Id: <account_id>` when available.
 - Optional daily account-credit endpoint:
   - `GET https://chatgpt.com/backend-api/wham/usage/daily-workspace-user-credit-usage` (default), with `start_date`, `end_date`, and `breakdown=product` query parameters.
-- Optional local CLI quota endpoint: `codex -s read-only -a untrusted app-server`, using the standard JSON-RPC handshake followed by `account/rateLimits/read`.
+- Optional local CLI quota endpoint: `codex app-server`, using the standard JSON-RPC handshake followed by `account/rateLimits/read`.
 
 ## Files read
 
