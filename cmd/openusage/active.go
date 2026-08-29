@@ -15,9 +15,10 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/daemon"
 )
 
-// activeTimeout caps how long the CLI waits on the daemon. A status-bar item
-// polls on a short interval and must degrade rather than hang.
-const activeTimeout = 2 * time.Second
+// activeTimeout caps how long the CLI waits on the daemon. The active endpoint
+// may need a little over two seconds to rebuild its read model, while a
+// status-bar item still needs a bounded request.
+const activeTimeout = 4 * time.Second
 
 type activeOptions struct {
 	socketPath string

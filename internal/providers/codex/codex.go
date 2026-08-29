@@ -126,7 +126,20 @@ type usagePayload struct {
 	Credits              *usageCredits          `json:"credits,omitempty"`
 	IndividualLimit      *creditLimitDetails    `json:"individual_limit,omitempty"`
 	IndividualLimitV2    *creditLimitDetails    `json:"individualLimit,omitempty"`
+	SpendControl         *usageSpendControl     `json:"spend_control,omitempty"`
 	RateLimitStatus      *usageRateLimitStatus  `json:"rate_limit_status,omitempty"`
+}
+
+type usageSpendControl struct {
+	IndividualLimit   *creditLimitDetails `json:"individual_limit,omitempty"`
+	IndividualLimitV2 *creditLimitDetails `json:"individualLimit,omitempty"`
+}
+
+func (s *usageSpendControl) creditLimit() *creditLimitDetails {
+	if s == nil {
+		return nil
+	}
+	return firstCreditLimit(s.IndividualLimitV2, s.IndividualLimit)
 }
 
 type usageRateLimitStatus struct {
@@ -315,14 +328,24 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	hasLiveData, liveErr := p.fetchLiveUsage(ctx, acct, configDir, &snap)
-	if liveErr != nil {
-		snap.Raw["quota_api_error"] = liveErr.Error()
+	quotaFetches := p.startCodexQuotaFetches(ctx, acct, configDir, snap)
+	liveResult := <-quotaFetches.live
+	cliResult := <-quotaFetches.cli
+	hasLiveData := liveResult.available
+	liveErr := liveResult.err
+	if liveResult.err != nil {
+		snap.Raw["quota_api_error"] = liveResult.err.Error()
+	}
+	if liveResult.available {
+		mergeCodexQuotaSnapshot(&snap, &liveResult.snapshot, true)
 	}
 
-	hasCLIData, cliErr := p.fetchCLIRateLimits(ctx, acct, configDir, &snap)
-	if cliErr != nil {
-		snap.Raw["cli_rate_limits_error"] = cliErr.Error()
+	hasCLIData := cliResult.available
+	if cliResult.err != nil {
+		snap.Raw["cli_rate_limits_error"] = cliResult.err.Error()
+	}
+	if cliResult.available {
+		mergeCodexQuotaSnapshot(&snap, &cliResult.snapshot, !liveResult.available)
 	}
 	// This request now has its own snapshot and goroutine. It can complete
 	// while the full session breakdown is still walking local history.

@@ -80,6 +80,63 @@ func TestApplyCodexCLIRateLimits(t *testing.T) {
 	}
 }
 
+func TestApplyCodexCLIRateLimitsParsesCurrentAppServerWindows(t *testing.T) {
+	snap := core.NewUsageSnapshot("codex", "test")
+	resultJSON := []byte(`{
+		"rateLimits": {
+			"primary": {"usedPercent": 20, "windowDurationMins": 300, "resetsAt": 1787970883},
+			"secondary": {"usedPercent": 47, "windowDurationMins": 10080, "resetsAt": 1788455611},
+			"credits": {"hasCredits": false, "unlimited": false, "balance": "0"},
+			"planType": "plus"
+		},
+		"rateLimitsByLimitId": {
+			"codex": {
+				"primary": {"usedPercent": 20, "windowDurationMins": 300, "resetsAt": 1787970883},
+				"secondary": {"usedPercent": 47, "windowDurationMins": 10080, "resetsAt": 1788455611}
+			}
+		}
+	}`)
+	var result codexCLIRateLimitsResult
+	if err := json.Unmarshal(resultJSON, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	if !applyCodexCLIRateLimits(result, &snap) {
+		t.Fatal("expected current app-server rate limits to apply")
+	}
+	primary := snap.Metrics["rate_limit_primary"]
+	if primary.Used == nil || *primary.Used != 20 {
+		got := float64(0)
+		if primary.Used != nil {
+			got = *primary.Used
+		}
+		t.Fatalf("rate_limit_primary used = %.1f, want 20", got)
+	}
+	secondary := snap.Metrics["rate_limit_secondary"]
+	if secondary.Used == nil || *secondary.Used != 47 {
+		got := float64(0)
+		if secondary.Used != nil {
+			got = *secondary.Used
+		}
+		t.Fatalf("rate_limit_secondary used = %.1f, want 47", got)
+	}
+	if got := snap.Metrics["rate_limit_primary"].Window; got != "5h" {
+		t.Fatalf("rate_limit_primary window = %q, want 5h", got)
+	}
+	if got := snap.Metrics["rate_limit_secondary"].Window; got != "7d" {
+		t.Fatalf("rate_limit_secondary window = %q, want 7d", got)
+	}
+	if got := snap.Resets["rate_limit_primary"].Unix(); got != 1787970883 {
+		t.Fatalf("rate_limit_primary reset = %d, want 1787970883", got)
+	}
+	if got := snap.Raw["plan_type"]; got != "plus" {
+		t.Fatalf("plan_type = %q, want plus", got)
+	}
+	if got := snap.Raw["rate_limit_source"]; got != "cli_rpc" {
+		t.Fatalf("rate_limit_source = %q, want cli_rpc", got)
+	}
+}
+
 func TestFetchUsesCLIRateLimits(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmpDir, "auth.json"), []byte(`{"tokens":{}}`), 0600); err != nil {
