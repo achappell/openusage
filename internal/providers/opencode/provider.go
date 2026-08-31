@@ -13,10 +13,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
-var (
-	loadBrowserSession = shared.LoadOrRefreshBrowserSession
-	newConsoleClient   = NewConsoleClient
-)
+var newConsoleClient = NewConsoleClient
 
 // OpenCode Zen exposes only OpenAI-compatible chat/messages/models endpoints
 // behind its API-key auth (verified via reverse-engineering against the
@@ -152,7 +149,7 @@ var errNoCookieConfigured = errors.New("opencode: no browser session configured"
 // accounts use different browsers for the same domain.
 //
 // A package-level var (not a plain func) so tests can stub it — mirrors the
-// loadBrowserSession/newConsoleClient seams above.
+// newConsoleClient seam above.
 var loadStoredSession = func(accountID string) (config.BrowserSession, bool, error) {
 	return config.LoadSession(accountID)
 }

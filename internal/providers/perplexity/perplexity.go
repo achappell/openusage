@@ -28,6 +28,13 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
+// loadStoredSession is a seam so tests can supply a session instead of reading
+// the developer's real credentials file. It deliberately does not refresh from
+// the browser cookie store: doing so on every poll overwrites the stored
+// session and clobbers a sibling account that shares this provider's cookie
+// domain but was connected from a different browser.
+var loadStoredSession = config.LoadSession
+
 const (
 	consoleBaseURL = "https://console.perplexity.ai"
 
@@ -85,7 +92,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	// fixed cookie domain but use different source browsers. See the
 	// equivalent opencode fix (loadStoredSession in
 	// internal/providers/opencode/provider.go) for the bug this avoids.
-	session, ok, err := config.LoadSession(acct.ID)
+	session, ok, err := loadStoredSession(acct.ID)
 	if err != nil || !ok || session.Value == "" {
 		snap.Status = core.StatusAuth
 		snap.Message = "browser session not configured — Settings → 5 KEYS → perplexity → Enter"

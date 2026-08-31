@@ -32,6 +32,18 @@ func isolateConfigDir(t *testing.T) {
 	}
 }
 
+// stubNoBrowserSession makes the stored-session lookup report "none configured"
+// without touching the developer's real credentials file.
+func stubNoBrowserSession(t *testing.T) {
+	t.Helper()
+
+	orig := loadStoredSession
+	t.Cleanup(func() { loadStoredSession = orig })
+	loadStoredSession = func(string) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{}, false, nil
+	}
+}
+
 func configSaveSession(accountID, value string) error {
 	return config.SaveSession(accountID, config.BrowserSession{
 		Domain:        ".perplexity.ai",
@@ -128,6 +140,11 @@ func TestFetch_CookieConfigured_PopulatesAllFields(t *testing.T) {
 // No cookie → AUTH state with helpful message pointing at the connect flow.
 func TestFetch_NoCookie_AuthMessage(t *testing.T) {
 	isolateConfigDir(t)
+	// With no stored session, the real lookup falls through to scanning the
+	// developer's browsers, and decrypting a Chrome cookie for perplexity.ai
+	// blocks in a macOS Keychain prompt no test binary can answer. Stub the
+	// no-session answer this test is actually about.
+	stubNoBrowserSession(t)
 
 	snap, err := New().Fetch(context.Background(), core.AccountConfig{
 		ID:       "perplexity",
