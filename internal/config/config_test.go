@@ -26,9 +26,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Theme != "Gruvbox" {
 		t.Errorf("default theme = %q, want 'Gruvbox'", cfg.Theme)
 	}
-	if cfg.Experimental.Analytics {
-		t.Error("expected experimental analytics to be false by default")
-	}
 	if cfg.Dashboard.View != DashboardViewGrid {
 		t.Errorf("default dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewGrid)
 	}
@@ -112,9 +109,6 @@ func TestLoadFrom_ValidFile(t *testing.T) {
 	}
 	if cfg.Theme != "Nord" {
 		t.Errorf("theme = %q, want 'Nord'", cfg.Theme)
-	}
-	if !cfg.Experimental.Analytics {
-		t.Error("expected analytics=true")
 	}
 	if cfg.AutoDetect {
 		t.Error("expected auto_detect=false")
@@ -305,7 +299,7 @@ func TestSaveTo_CreatesFileAndDir(t *testing.T) {
 
 	cfg := DefaultConfig()
 	cfg.Theme = "Dracula"
-	cfg.Experimental.Analytics = true
+	cfg.Data.RetentionDays = 45
 
 	if err := SaveTo(path, cfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -318,8 +312,8 @@ func TestSaveTo_CreatesFileAndDir(t *testing.T) {
 	if loaded.Theme != "Dracula" {
 		t.Errorf("expected 'Dracula', got %q", loaded.Theme)
 	}
-	if !loaded.Experimental.Analytics {
-		t.Error("expected analytics=true after round-trip")
+	if loaded.Data.RetentionDays != 45 {
+		t.Errorf("retention_days = %d, want 45 after round-trip", loaded.Data.RetentionDays)
 	}
 }
 
@@ -469,7 +463,7 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 
 	original := DefaultConfig()
 	original.Theme = "Synthwave '84"
-	original.Experimental.Analytics = false
+	original.Data.RetentionDays = 45
 
 	if err := SaveTo(path, original); err != nil {
 		t.Fatalf("save error: %v", err)
@@ -483,8 +477,8 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 	if loaded.Theme != original.Theme {
 		t.Errorf("theme mismatch: got %q, want %q", loaded.Theme, original.Theme)
 	}
-	if loaded.Experimental.Analytics != original.Experimental.Analytics {
-		t.Errorf("analytics mismatch: got %v, want %v", loaded.Experimental.Analytics, original.Experimental.Analytics)
+	if loaded.Data.RetentionDays != original.Data.RetentionDays {
+		t.Errorf("retention_days mismatch: got %v, want %v", loaded.Data.RetentionDays, original.Data.RetentionDays)
 	}
 }
 
@@ -493,7 +487,7 @@ func TestSaveThemeTo(t *testing.T) {
 
 	// Start with a config
 	cfg := DefaultConfig()
-	cfg.Experimental.Analytics = true
+	cfg.Data.RetentionDays = 45
 	if err := SaveTo(path, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -511,8 +505,8 @@ func TestSaveThemeTo(t *testing.T) {
 	if loaded.Theme != "Nord" {
 		t.Errorf("theme = %q, want 'Nord'", loaded.Theme)
 	}
-	if !loaded.Experimental.Analytics {
-		t.Error("analytics should be preserved after SaveThemeTo")
+	if loaded.Data.RetentionDays != 45 {
+		t.Errorf("retention_days = %d, want 45 preserved after SaveThemeTo", loaded.Data.RetentionDays)
 	}
 }
 
@@ -1444,5 +1438,29 @@ func TestSaveAccountCreditLimitOverrideKeepsCustomizedManualAccount(t *testing.T
 	}
 	if len(loaded.Accounts) != 1 || loaded.Accounts[0].CreditLimitOverride != nil || loaded.Accounts[0].Binary != "/custom/codex" {
 		t.Fatalf("expected customized manual account with cleared cap, got %+v", loaded.Accounts)
+	}
+}
+
+// The Analytics screen used to be gated behind experimental.analytics. The key
+// is retired, but plenty of configs still carry it, so loading one must not
+// fail -- the key is simply ignored. encoding/json drops unknown fields, and
+// nothing here sets DisallowUnknownFields; this test pins that.
+func TestLoadFrom_RetiredExperimentalKeyIsIgnored(t *testing.T) {
+	for _, body := range []string{
+		`{"theme":"Nord","experimental":{"analytics":false}}`,
+		`{"theme":"Nord","experimental":{"analytics":true}}`,
+		`{"theme":"Nord","experimental":{}}`,
+	} {
+		path := filepath.Join(t.TempDir(), "settings.json")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadFrom(path)
+		if err != nil {
+			t.Fatalf("LoadFrom(%s) error = %v", body, err)
+		}
+		if cfg.Theme != "Nord" {
+			t.Errorf("LoadFrom(%s) theme = %q, want Nord -- the rest of the config must still apply", body, cfg.Theme)
+		}
 	}
 }

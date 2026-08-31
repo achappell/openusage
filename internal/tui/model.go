@@ -231,8 +231,6 @@ type Model struct {
 	// future render-cache work a stable cache key, and keeps View() pure).
 	referenceTime time.Time
 
-	experimentalAnalytics bool // when false, only the Dashboard screen is available
-
 	daemon daemonState
 
 	providerOrder       []string
@@ -264,7 +262,6 @@ type Model struct {
 
 func NewModel(
 	warnThresh, critThresh float64,
-	experimentalAnalytics bool,
 	dashboardCfg config.DashboardConfig,
 	accounts []core.AccountConfig,
 	timeWindow core.TimeWindow,
@@ -273,7 +270,6 @@ func NewModel(
 		snapshots:             make(map[string]core.UsageSnapshot),
 		warnThreshold:         warnThresh,
 		critThreshold:         critThresh,
-		experimentalAnalytics: experimentalAnalytics,
 		providerEnabled:       make(map[string]bool),
 		accountProviders:      make(map[string]string),
 		accountCreditLimits:   make(map[string]*float64),

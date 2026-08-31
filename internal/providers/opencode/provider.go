@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
@@ -14,10 +15,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
-var (
-	loadBrowserSession = shared.LoadOrRefreshBrowserSession
-	newConsoleClient   = NewConsoleClient
-)
+var newConsoleClient = NewConsoleClient
 
 // OpenCode Zen exposes only OpenAI-compatible chat/messages/models endpoints
 // behind its API-key auth (verified via reverse-engineering against the
@@ -37,6 +35,8 @@ const (
 
 type Provider struct {
 	providerbase.Base
+	telemetryCacheMu        sync.Mutex
+	telemetryDBFingerprints map[string]string
 }
 
 func New() *Provider {

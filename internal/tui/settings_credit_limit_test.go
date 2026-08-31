@@ -22,7 +22,7 @@ func (s *creditLimitServices) SaveAccountCreditLimitOverride(accountID string, l
 }
 
 func creditLimitModel() Model {
-	m := NewModel(80, 90, false, config.DashboardConfig{}, []core.AccountConfig{{ID: "codex-cli", Provider: "codex"}}, core.TimeWindow7d)
+	m := NewModel(80, 90, config.DashboardConfig{}, []core.AccountConfig{{ID: "codex-cli", Provider: "codex"}}, core.TimeWindow7d)
 	m.settings.show = true
 	m.settings.tab = settingsTabProviders
 	return m

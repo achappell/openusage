@@ -90,10 +90,10 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	if err := ctx.Err(); err != nil {
-		return core.UsageSnapshot{}, err
+		return snap, err
 	}
 	if path == "" {
-		snap.Status = core.StatusError
+		snap.Status = core.StatusAuth
 		snap.Message = "Antigravity status-line path is unavailable"
 		return snap, nil
 	}
@@ -101,12 +101,12 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			snap.Status = core.StatusError
+			snap.Status = core.StatusAuth
 			snap.Message = "No Antigravity status-line data yet"
 			snap.SetDiagnostic("setup", "Run `openusage integrations install antigravity`, then start agy")
 			return snap, nil
 		}
-		return core.UsageSnapshot{}, fmt.Errorf("antigravity: read status file: %w", err)
+		return snap, fmt.Errorf("antigravity: read status file: %w", err)
 	}
 
 	payload, err := parseStatusLinePayload(data)
