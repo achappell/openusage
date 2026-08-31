@@ -529,7 +529,10 @@ func (c *ConsoleClient) FetchGoUsagePage(ctx context.Context, workspaceID string
 		return SubscriptionUsage{}, BillingInfo{}, &ConsoleAuthError{StatusCode: 401, Body: "page indicates signed out"}
 	}
 
-	subscription, billing := parseGoUsagePageHTML(html)
+	subscription, billing, err := parseGoUsagePageHTML(html)
+	if err != nil {
+		return SubscriptionUsage{}, BillingInfo{}, fmt.Errorf("console: parse go page: %w", err)
+	}
 	return subscription, billing, nil
 }
 
@@ -544,7 +547,7 @@ func looksSignedOutFromHTML(html string) bool {
 
 // parseGoUsagePageHTML extracts billing and subscription usage data from the
 // embedded Seroval script in the OpenCode Go usage page HTML.
-func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo) {
+func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo, error) {
 	subscription := SubscriptionUsage{}
 	billing := BillingInfo{}
 
@@ -552,16 +555,22 @@ func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo) {
 	scriptRE := regexp.MustCompile(`self\.\$R=self\.\$R\|\|\[\].*`)
 	scriptMatch := scriptRE.FindString(html)
 	if scriptMatch == "" {
-		return subscription, billing
+		return subscription, billing, errors.New("console: go usage page missing embedded usage data")
 	}
 
 	// Extract billing data by finding the billing.get assignment followed by
 	// the billing fields object. The pattern is:
 	// billing.get["wrk_..."]}=$R[N]=$R[M]($R[O]={...billing fields...})
 	billingObjRE := regexp.MustCompile(`billing\.get\["[^"]*"\].*?\$R\[\d+\]=\{([^}]+)\}`)
-	if matches := billingObjRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
-		billing = parseBillingFields(matches[1])
+	billingMatches := billingObjRE.FindStringSubmatch(scriptMatch)
+	if len(billingMatches) <= 1 {
+		return subscription, billing, errors.New("console: go usage page missing billing data")
 	}
+	billingFields := billingMatches[1]
+	if !hasRecognizedBillingField(billingFields) {
+		return subscription, billing, errors.New("console: go usage page has unrecognized billing data")
+	}
+	billing = parseBillingFields(billingFields)
 
 	// Extract subscription usage. The pattern is:
 	// rollingUsage:$R[N]={status:"ok",resetInSec:N,usagePercent:N},...
@@ -602,7 +611,26 @@ func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo) {
 		}
 	}
 
-	return subscription, billing
+	return subscription, billing, nil
+}
+
+func hasRecognizedBillingField(fields string) bool {
+	for _, key := range []string{
+		"balance",
+		"reloadAmount",
+		"reloadTrigger",
+		"monthlyLimit",
+		"monthlyUsage",
+		"customerID",
+		"paymentMethodType",
+		"subscriptionID",
+		"subscriptionPlan",
+	} {
+		if strings.Contains(fields, key+":") {
+			return true
+		}
+	}
+	return false
 }
 
 // parseBillingFields extracts billing info from a Seroval object fragment

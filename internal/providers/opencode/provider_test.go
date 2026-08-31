@@ -306,3 +306,66 @@ func TestFetch_ConsoleDoubleFailure_DoesNotFabricateZeroBalance(t *testing.T) {
 		t.Errorf("expected opencode_console_auth_error diagnostic, got diagnostics=%+v", snap.Diagnostics)
 	}
 }
+
+func TestFetch_ConsoleShapeChange_DoesNotFabricateZeroBalance(t *testing.T) {
+	origLoadStoredSession := loadStoredSession
+	origNewConsoleClient := newConsoleClient
+	t.Cleanup(func() {
+		loadStoredSession = origLoadStoredSession
+		newConsoleClient = origNewConsoleClient
+	})
+
+	loadStoredSession = func(string) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{
+			Value:         "test-cookie-value",
+			CookieName:    "auth",
+			SourceBrowser: "firefox",
+		}, true, nil
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/workspace/wrk_test/go" {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<html><body>usage layout changed</body></html>"))
+			return
+		}
+		if r.URL.Path == "/_server" {
+			http.Error(w, "billing fallback unavailable", http.StatusInternalServerError)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	newConsoleClient = func(cookieValue, cookieName, workspaceID string) *ConsoleClient {
+		client := NewConsoleClient(cookieValue, cookieName, workspaceID)
+		client.baseURL = server.URL
+		return client
+	}
+
+	acct := core.AccountConfig{
+		ID:        "opencode-shape-change",
+		Provider:  "opencode",
+		APIKeyEnv: "TEST_OPENCODE_MISSING_SHAPE",
+		BrowserCookie: &core.BrowserCookieRef{
+			Domain:        ".opencode.ai",
+			CookieName:    "auth",
+			SourceBrowser: "firefox",
+		},
+	}
+	acct.SetHint("opencode_workspace_id", "wrk_test")
+
+	snap, err := New().Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch error: %v", err)
+	}
+	if snap.Status != core.StatusAuth {
+		t.Fatalf("status = %s, want AUTH for changed page shape (msg=%q)", snap.Status, snap.Message)
+	}
+	if _, ok := snap.Metrics["console_balance"]; ok {
+		t.Fatalf("console_balance metric present for changed page shape: %+v", snap.Metrics["console_balance"])
+	}
+	if snap.Raw["console_error"] == "" {
+		t.Errorf("expected console_error diagnostic for changed page shape, got raw=%v", snap.Raw)
+	}
+}

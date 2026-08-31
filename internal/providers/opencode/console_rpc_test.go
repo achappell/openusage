@@ -333,7 +333,10 @@ func TestParseGoUsagePageHTML_ZeroUsagePercentIsNotDroppedAsMissing(t *testing.T
 		`monthlyUsage:$R[6]={status:"ok",resetInSec:900000,usagePercent:0};` +
 		`</script></html>`
 
-	subscription, _ := parseGoUsagePageHTML(html)
+	subscription, _, err := parseGoUsagePageHTML(html)
+	if err != nil {
+		t.Fatalf("parseGoUsagePageHTML error: %v", err)
+	}
 
 	if !subscription.RollingUsageOK {
 		t.Fatalf("RollingUsageOK = false, want true (usagePercent:0 is a legitimate reading, not a missing field)")
@@ -357,10 +360,21 @@ func TestParseGoUsagePageHTML_MissingBlockLeavesUsageOKFalse(t *testing.T) {
 		`billing.get["wrk_x"]}=$R[1]=$R[2]($R[3]={balance:0,reloadAmount:0,reloadTrigger:0});` +
 		`</script></html>`
 
-	subscription, _ := parseGoUsagePageHTML(html)
+	subscription, _, err := parseGoUsagePageHTML(html)
+	if err != nil {
+		t.Fatalf("parseGoUsagePageHTML error: %v", err)
+	}
 
 	if subscription.RollingUsageOK || subscription.WeeklyUsageOK || subscription.MonthlyUsageOK {
 		t.Errorf("expected all *UsageOK flags false when no usage blocks are present, got rolling=%v weekly=%v monthly=%v",
 			subscription.RollingUsageOK, subscription.WeeklyUsageOK, subscription.MonthlyUsageOK)
+	}
+}
+
+func TestParseGoUsagePageHTML_ChangedShapeReturnsError(t *testing.T) {
+	_, _, err := parseGoUsagePageHTML(`<html><script>self.$R=self.$R||[];` +
+		`usagePage:{shape:"changed"}</script></html>`)
+	if err == nil {
+		t.Fatal("parseGoUsagePageHTML returned nil error for an unrecognized page shape")
 	}
 }
