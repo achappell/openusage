@@ -60,14 +60,14 @@ func New() *Provider {
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{
 					"Set OPENCODE_API_KEY (or ZEN_API_KEY) with your OpenCode Zen key for chat-surface auth.",
-					"For balance / monthly usage / subscription data: open Settings → 5 KEYS, highlight opencode, and press c to import the session cookie from your browser.",
+					"For OpenCode Go balance / monthly usage / subscription data: open Settings → 5 KEYS, highlight opencode, and press c to import the session cookie from your browser.",
 					"Tile spend / model / activity metrics are populated from the OpenCode telemetry plugin; see Settings → 7 INTEG.",
 				},
 			},
 			Dashboard: providerbase.DefaultDashboard(
 				providerbase.WithColorRole(core.DashboardColorRoleBlue),
 				providerbase.WithGaugePriority("rolling_usage", "weekly_usage", "monthly_usage_pct", "console_balance", "monthly_limit"),
-				// OpenCode Zen quota has three meaningful usage-window
+				// OpenCode Go quota has three meaningful usage-window
 				// percentages (5h / 7d / ~30d monthly) — the default cap of 2
 				// gauge lines would always bump the monthly figure in favor
 				// of the two shorter windows.
