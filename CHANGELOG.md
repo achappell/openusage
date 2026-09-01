@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.0 (2026-09-01)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* Sync fork main with upstream by @achappell in https://github.com/achappell/openusage/pull/19
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.3...v0.27.0
+
 ## 0.26.3 (2026-08-29)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
