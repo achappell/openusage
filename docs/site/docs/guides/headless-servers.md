@@ -67,18 +67,6 @@ tmux attach -t usage
 
 The TUI keeps rendering whether anyone is attached or not.
 
-## Disabling Analytics on small servers
-
-The Analytics screen is opt-in (`cfg.Experimental.Analytics`). On a server you may want to leave it off to keep the rendering loop tight:
-
-```json
-{
-  "experimental": { "analytics": false }
-}
-```
-
-The Tab cycle then just bounces between dashboard views.
-
 ## Integrations on a server
 
 If the server itself runs Claude Code, Codex, or OpenCode jobs, install the hooks the same way as on a workstation:
@@ -89,7 +77,7 @@ openusage integrations install codex
 openusage integrations install opencode
 ```
 
-Each tool's config file is patched (Claude `~/.claude/settings.json`, Codex `~/.codex/config.toml`, OpenCode `~/.config/opencode/opencode.json`). The hook scripts shell out to `openusage telemetry hook <source>` and post events to the daemon.
+Claude and Codex have their config files patched (`~/.claude/settings.json`, `~/.codex/config.toml`). OpenCode needs no config change — it auto-discovers plugins in `~/.config/opencode/plugins/`. The hook scripts shell out to `openusage telemetry hook <source>` and post events to the daemon.
 
 If the daemon is briefly unavailable, hooks spool to `~/.local/state/openusage/telemetry-spool/` and are drained when it comes back.
 

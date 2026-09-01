@@ -84,14 +84,32 @@ func TestFetchMissingStatusLineIsNonFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
-	if snap.Status != core.StatusError {
-		t.Fatalf("status = %q, want %q", snap.Status, core.StatusError)
+	if snap.Status != core.StatusAuth {
+		t.Fatalf("status = %q, want %q", snap.Status, core.StatusAuth)
 	}
 	if !strings.Contains(snap.Message, "No Antigravity") {
 		t.Fatalf("message = %q, want setup guidance", snap.Message)
 	}
 }
+func TestFetchCanceledContextKeepsStatusFileDiagnostic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	path := filepath.Join(t.TempDir(), "antigravity-status.json")
 
+	snap, err := New().Fetch(ctx, core.AccountConfig{
+		ID:       "antigravity",
+		Provider: "antigravity",
+		ProviderPaths: map[string]string{
+			"status_file": path,
+		},
+	})
+	if err == nil {
+		t.Fatal("Fetch() error = nil, want canceled context error")
+	}
+	if got := snap.Raw["status_file"]; got != path {
+		t.Fatalf("status_file diagnostic = %q, want %q", got, path)
+	}
+}
 func TestTelemetryRevisionAndCurrentUsage(t *testing.T) {
 	p := New()
 	events, err := p.ParseHookPayload([]byte(sampleStatusLineJSON), shared.TelemetryCollectOptions{})

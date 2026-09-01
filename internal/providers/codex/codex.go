@@ -33,22 +33,25 @@ var errLiveUsageAuth = errors.New("live usage auth failed")
 
 type Provider struct {
 	providerbase.Base
-	telemetryCacheMu sync.Mutex
-	telemetryCache   map[string]*telemetryCacheEntry
-	creditHistoryMu  sync.Mutex
-	creditHistory    map[string][]creditUsageObservation
-	creditDailyMu    sync.Mutex
-	creditDaily      map[string]dailyCreditUsageCache
-	creditDailyFail  map[string]dailyCreditUsageFailure
+	telemetryCacheMu             sync.Mutex
+	telemetryCache               map[string]*telemetryCacheEntry
+	telemetryBaselineInitialized bool
+	creditHistoryMu              sync.Mutex
+	creditHistory                map[string][]creditUsageObservation
+	creditDailyMu                sync.Mutex
+	creditDaily                  map[string]dailyCreditUsageCache
+	creditDailyFail              map[string]dailyCreditUsageFailure
 	// creditDailyNow is the clock used for daily-credit cache freshness.
 	// Tests swap it out to advance past the TTL deterministically.
 	creditDailyNow func() time.Time
 }
 
 type telemetryCacheEntry struct {
-	modTime time.Time
-	size    int64
-	events  []shared.TelemetryEvent
+	modTime    time.Time
+	size       int64
+	byteOffset int64
+	lineNumber int
+	state      *telemetryParserState
 }
 
 func New() *Provider {
@@ -316,7 +319,15 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if metric, ok := snap.Metrics["context_window"]; ok {
 		breakdownBase.Metrics["context_window"] = metric
 	}
-	breakdownDone := startCodexSessionBreakdown(sessionsDir, breakdownBase, p.readSessionUsageBreakdowns)
+	var breakdownDone <-chan codexSessionBreakdownResult
+	if codexSessionUsageBreakdownsEnabled() {
+		breakdownDone = startCodexSessionBreakdown(sessionsDir, breakdownBase, p.readSessionUsageBreakdowns)
+	} else {
+		snap.Raw["session_breakdowns"] = "disabled"
+		done := make(chan codexSessionBreakdownResult, 1)
+		done <- codexSessionBreakdownResult{}
+		breakdownDone = done
+	}
 
 	// Read the CLI version before any network fetcher: they stamp it into
 	// their User-Agent, so reading it afterwards leaves that header bare.
