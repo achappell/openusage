@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -287,12 +288,13 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 		remaining := clamp(*quota.RemainingFraction, 0, 1)
 		remainingPercent := remaining * 100
 		key := "quota_" + sanitizeMetricName(name)
+		window := quotaWindow(name)
 		snap.Metrics[key] = core.Metric{
 			Limit:     core.Float64Ptr(100),
 			Used:      core.Float64Ptr(100 - remainingPercent),
 			Remaining: core.Float64Ptr(remainingPercent),
 			Unit:      "%",
-			Window:    "quota",
+			Window:    window,
 			ResetKey:  key + "_reset",
 		}
 		if reset := quotaResetTime(quota, payloadReceivedAt(payload)); !reset.IsZero() {
@@ -315,7 +317,7 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 		Used:      core.Float64Ptr(100 - remainingPercent),
 		Remaining: core.Float64Ptr(remainingPercent),
 		Unit:      "%",
-		Window:    "quota",
+		Window:    quotaWindow(worstName),
 		ResetKey:  "quota_reset",
 	}
 	if quota, ok := payload.Quota[worstName]; ok {
@@ -324,6 +326,33 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 			snap.Resets["quota"] = reset
 		}
 	}
+}
+
+func quotaWindow(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.Contains(lower, "5h"):
+		return "5h"
+	case strings.Contains(lower, "weekly"), strings.Contains(lower, "7d"):
+		return "7d"
+	case strings.Contains(lower, "daily"), strings.Contains(lower, "24h"), strings.Contains(lower, "1d"):
+		return "1d"
+	case strings.Contains(lower, "monthly"), strings.Contains(lower, "30d"):
+		return "30d"
+	}
+	for _, part := range strings.FieldsFunc(lower, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == '/' || r == ' '
+	}) {
+		if len(part) >= 2 {
+			unit := part[len(part)-1]
+			if unit == 'h' || unit == 'd' || unit == 'w' || unit == 'm' {
+				if _, err := strconv.Atoi(part[:len(part)-1]); err == nil {
+					return part
+				}
+			}
+		}
+	}
+	return "quota"
 }
 
 func statusFromQuota(payload statusLinePayload) core.Status {

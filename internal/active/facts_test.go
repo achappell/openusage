@@ -125,3 +125,34 @@ func TestBuildFactsAntigravityReset(t *testing.T) {
 		t.Fatalf("legacy ResetAt = %v, want %v", factsLegacy.ResetAt, reset)
 	}
 }
+
+func TestBuildFactsAntigravityRunoutPacing(t *testing.T) {
+	remaining := 10.0
+	runoutHours := 0.2                  // ~12 minutes
+	reset := at("2026-09-06T19:00:00Z") // 4 hours away
+	now := at("2026-09-06T15:00:00Z")
+	snap := core.NewUsageSnapshot("antigravity", "antigravity")
+	snap.Metrics["quota"] = core.Metric{
+		Remaining: &remaining,
+		Unit:      "%",
+		Window:    "5h",
+		ResetKey:  "quota_reset",
+	}
+	snap.Metrics["quota_runout_hours"] = core.Metric{
+		Used: &runoutHours,
+		Unit: "h",
+	}
+	snap.Resets["quota_reset"] = reset
+
+	facts := BuildFacts(snap, now)
+	if !facts.RunoutBeforeReset {
+		t.Fatal("RunoutBeforeReset = false, want true")
+	}
+	label, severity := Narrate(facts, now)
+	if label != "12m/4h" {
+		t.Fatalf("label = %q, want %q", label, "12m/4h")
+	}
+	if severity != SeverityBad {
+		t.Fatalf("severity = %v, want %v", severity, SeverityBad)
+	}
+}
