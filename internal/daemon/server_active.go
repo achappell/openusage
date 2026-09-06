@@ -62,9 +62,21 @@ func (s *Service) computeActiveDetails(ctx context.Context) (activeComputation, 
 	if err != nil {
 		return activeComputation{}, fmt.Errorf("daemon: building read-model request: %w", err)
 	}
-	snapshots, err := s.computeReadModel(ctx, req)
-	if err != nil {
-		return activeComputation{}, fmt.Errorf("daemon: reading snapshots: %w", err)
+	var snapshots map[string]core.UsageSnapshot
+	cacheKey := ReadModelRequestKey(req)
+	if cached, cachedAt, ok := s.rmCache.get(cacheKey); ok {
+		snapshots = cached
+		if time.Since(cachedAt) > 2*time.Second && s.ingestedSince(cachedAt) {
+			s.refreshReadModelCacheAsync(s.serviceContext(ctx), cacheKey, req, 60*time.Second)
+		}
+	} else {
+		snapshots, err = s.computeReadModel(ctx, req)
+		if err != nil {
+			return activeComputation{}, fmt.Errorf("daemon: reading snapshots: %w", err)
+		}
+		if len(snapshots) > 0 {
+			s.rmCache.set(cacheKey, snapshots)
+		}
 	}
 
 	input, byKey := buildActiveSelectionInput(snapshots, lastEvents, pinnedKey)

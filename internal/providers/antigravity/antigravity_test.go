@@ -67,8 +67,11 @@ func TestCaptureStatusLineAndFetch(t *testing.T) {
 	if len(snap.ModelUsage) != 1 || snap.ModelUsage[0].RawModelID != "Gemini Pro" {
 		t.Fatalf("model usage = %+v, want one Gemini Pro row", snap.ModelUsage)
 	}
-	if snap.Resets["quota_pro_reset"].IsZero() || snap.Resets["quota_reset"].IsZero() {
+	if snap.Resets["quota_pro_reset"].IsZero() || snap.Resets["quota_reset"].IsZero() || snap.Resets["quota"].IsZero() {
 		t.Fatal("expected quota reset timestamps")
+	}
+	if snap.Metrics["quota"].ResetKey != "quota_reset" {
+		t.Fatalf("quota metric ResetKey = %q, want %q", snap.Metrics["quota"].ResetKey, "quota_reset")
 	}
 }
 

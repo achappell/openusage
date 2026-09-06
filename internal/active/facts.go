@@ -68,6 +68,9 @@ func BuildFacts(snap core.UsageSnapshot, now time.Time) Facts {
 		if reset, ok := snap.Resets[resetKey]; ok {
 			r := reset
 			facts.ResetAt = &r
+		} else if reset, ok := snap.Resets[resetKey+"_reset"]; ok {
+			r := reset
+			facts.ResetAt = &r
 		}
 		break
 	}

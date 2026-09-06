@@ -92,3 +92,36 @@ func TestBuildFactsIgnoresNonQuotaCounters(t *testing.T) {
 		t.Fatalf("RequestsToday = %v, want %.0f", facts.RequestsToday, used)
 	}
 }
+
+func TestBuildFactsAntigravityReset(t *testing.T) {
+	remaining := 37.0
+	reset := at("2026-09-06T21:00:50Z")
+	snap := core.NewUsageSnapshot("antigravity", "antigravity")
+	snap.Metrics["quota"] = core.Metric{
+		Remaining: &remaining,
+		Unit:      "%",
+		ResetKey:  "quota_reset",
+	}
+	snap.Resets["quota_reset"] = reset
+
+	facts := BuildFacts(snap, time.Date(2026, 9, 6, 15, 0, 0, 0, time.UTC))
+	if facts.ResetAt == nil || !facts.ResetAt.Equal(reset) {
+		t.Fatalf("ResetAt = %v, want %v", facts.ResetAt, reset)
+	}
+	label, _ := Narrate(facts, time.Date(2026, 9, 6, 15, 0, 0, 0, time.UTC))
+	if label != "37% left/reset 6h 1m" {
+		t.Fatalf("label = %q, want %q", label, "37% left/reset 6h 1m")
+	}
+
+	// Also verify legacy fallback where ResetKey is empty and Resets has quota_reset
+	snapLegacy := core.NewUsageSnapshot("antigravity", "antigravity")
+	snapLegacy.Metrics["quota"] = core.Metric{
+		Remaining: &remaining,
+		Unit:      "%",
+	}
+	snapLegacy.Resets["quota_reset"] = reset
+	factsLegacy := BuildFacts(snapLegacy, time.Date(2026, 9, 6, 15, 0, 0, 0, time.UTC))
+	if factsLegacy.ResetAt == nil || !factsLegacy.ResetAt.Equal(reset) {
+		t.Fatalf("legacy ResetAt = %v, want %v", factsLegacy.ResetAt, reset)
+	}
+}

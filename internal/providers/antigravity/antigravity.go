@@ -293,9 +293,11 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 			Remaining: core.Float64Ptr(remainingPercent),
 			Unit:      "%",
 			Window:    "quota",
+			ResetKey:  key + "_reset",
 		}
 		if reset := quotaResetTime(quota, payloadReceivedAt(payload)); !reset.IsZero() {
 			snap.Resets[key+"_reset"] = reset
+			snap.Resets[key] = reset
 		}
 		if !found || remaining < worst {
 			worst = remaining
@@ -314,10 +316,12 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 		Remaining: core.Float64Ptr(remainingPercent),
 		Unit:      "%",
 		Window:    "quota",
+		ResetKey:  "quota_reset",
 	}
 	if quota, ok := payload.Quota[worstName]; ok {
 		if reset := quotaResetTime(quota, payloadReceivedAt(payload)); !reset.IsZero() {
 			snap.Resets["quota_reset"] = reset
+			snap.Resets["quota"] = reset
 		}
 	}
 }
