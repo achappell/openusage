@@ -96,6 +96,8 @@ func ApplyQuotaForecast(snap *UsageSnapshot) {
 	snap.Raw["quota_forecast_period_start"] = best.periodStart.UTC().Format(time.RFC3339)
 	snap.Raw["quota_forecast_reset_at"] = best.resetAt.UTC().Format(time.RFC3339)
 	snap.Raw["quota_forecast_summary"] = fmt.Sprintf("%.2f %s/hour; %.2f hours remaining", best.rate, best.metric.Unit, best.runout)
+	snap.SetAttribute("quota_forecast_metric", best.metricKey)
+	snap.SetAttribute("quota_forecast_source", "inferred_period_start")
 }
 
 func resetForMetric(resets map[string]time.Time, metricKey string) (time.Time, bool) {

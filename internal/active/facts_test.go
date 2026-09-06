@@ -92,3 +92,67 @@ func TestBuildFactsIgnoresNonQuotaCounters(t *testing.T) {
 		t.Fatalf("RequestsToday = %v, want %.0f", facts.RequestsToday, used)
 	}
 }
+
+func TestBuildFactsAntigravityReset(t *testing.T) {
+	remaining := 37.0
+	reset := at("2026-09-06T21:00:50Z")
+	snap := core.NewUsageSnapshot("antigravity", "antigravity")
+	snap.Metrics["quota"] = core.Metric{
+		Remaining: &remaining,
+		Unit:      "%",
+		ResetKey:  "quota_reset",
+	}
+	snap.Resets["quota_reset"] = reset
+
+	facts := BuildFacts(snap, time.Date(2026, 9, 6, 15, 0, 0, 0, time.UTC))
+	if facts.ResetAt == nil || !facts.ResetAt.Equal(reset) {
+		t.Fatalf("ResetAt = %v, want %v", facts.ResetAt, reset)
+	}
+	label, _ := Narrate(facts, time.Date(2026, 9, 6, 15, 0, 0, 0, time.UTC))
+	if label != "37% left/reset 6h 1m" {
+		t.Fatalf("label = %q, want %q", label, "37% left/reset 6h 1m")
+	}
+
+	// Also verify legacy fallback where ResetKey is empty and Resets has quota_reset
+	snapLegacy := core.NewUsageSnapshot("antigravity", "antigravity")
+	snapLegacy.Metrics["quota"] = core.Metric{
+		Remaining: &remaining,
+		Unit:      "%",
+	}
+	snapLegacy.Resets["quota_reset"] = reset
+	factsLegacy := BuildFacts(snapLegacy, time.Date(2026, 9, 6, 15, 0, 0, 0, time.UTC))
+	if factsLegacy.ResetAt == nil || !factsLegacy.ResetAt.Equal(reset) {
+		t.Fatalf("legacy ResetAt = %v, want %v", factsLegacy.ResetAt, reset)
+	}
+}
+
+func TestBuildFactsAntigravityRunoutPacing(t *testing.T) {
+	remaining := 10.0
+	runoutHours := 0.2                  // ~12 minutes
+	reset := at("2026-09-06T19:00:00Z") // 4 hours away
+	now := at("2026-09-06T15:00:00Z")
+	snap := core.NewUsageSnapshot("antigravity", "antigravity")
+	snap.Metrics["quota"] = core.Metric{
+		Remaining: &remaining,
+		Unit:      "%",
+		Window:    "5h",
+		ResetKey:  "quota_reset",
+	}
+	snap.Metrics["quota_runout_hours"] = core.Metric{
+		Used: &runoutHours,
+		Unit: "h",
+	}
+	snap.Resets["quota_reset"] = reset
+
+	facts := BuildFacts(snap, now)
+	if !facts.RunoutBeforeReset {
+		t.Fatal("RunoutBeforeReset = false, want true")
+	}
+	label, severity := Narrate(facts, now)
+	if label != "12m/4h" {
+		t.Fatalf("label = %q, want %q", label, "12m/4h")
+	}
+	if severity != SeverityBad {
+		t.Fatalf("severity = %v, want %v", severity, SeverityBad)
+	}
+}

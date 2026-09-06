@@ -33,7 +33,11 @@ func BuildFacts(snap core.UsageSnapshot, now time.Time) Facts {
 	// first. Prefer that same metric so its reset belongs to the forecast we
 	// are narrating, rather than pairing (for example) a rolling runout with
 	// a monthly reset.
-	if forecastMetric := strings.TrimSpace(snap.Attributes["quota_forecast_metric"]); forecastMetric != "" {
+	forecastMetric := strings.TrimSpace(snap.Attributes["quota_forecast_metric"])
+	if forecastMetric == "" {
+		forecastMetric = strings.TrimSpace(snap.Raw["quota_forecast_metric"])
+	}
+	if forecastMetric != "" {
 		ordered := make([]string, 0, len(names)+1)
 		ordered = append(ordered, forecastMetric)
 		for _, name := range names {
@@ -66,6 +70,9 @@ func BuildFacts(snap core.UsageSnapshot, now time.Time) Facts {
 			resetKey = name
 		}
 		if reset, ok := snap.Resets[resetKey]; ok {
+			r := reset
+			facts.ResetAt = &r
+		} else if reset, ok := snap.Resets[resetKey+"_reset"]; ok {
 			r := reset
 			facts.ResetAt = &r
 		}

@@ -67,8 +67,11 @@ func TestCaptureStatusLineAndFetch(t *testing.T) {
 	if len(snap.ModelUsage) != 1 || snap.ModelUsage[0].RawModelID != "Gemini Pro" {
 		t.Fatalf("model usage = %+v, want one Gemini Pro row", snap.ModelUsage)
 	}
-	if snap.Resets["quota_pro_reset"].IsZero() || snap.Resets["quota_reset"].IsZero() {
+	if snap.Resets["quota_pro_reset"].IsZero() || snap.Resets["quota_reset"].IsZero() || snap.Resets["quota"].IsZero() {
 		t.Fatal("expected quota reset timestamps")
+	}
+	if snap.Metrics["quota"].ResetKey != "quota_reset" {
+		t.Fatalf("quota metric ResetKey = %q, want %q", snap.Metrics["quota"].ResetKey, "quota_reset")
 	}
 }
 
@@ -208,3 +211,59 @@ const sampleStatusLineJSON = `{
   "plan_tier": "pro",
   "email": "amanda@example.com"
 }`
+
+func TestAntigravityQuotaWindowAndPacing(t *testing.T) {
+	if got := quotaWindow("gemini-5h"); got != "5h" {
+		t.Fatalf("quotaWindow(gemini-5h) = %q, want 5h", got)
+	}
+	if got := quotaWindow("gemini-weekly"); got != "7d" {
+		t.Fatalf("quotaWindow(gemini-weekly) = %q, want 7d", got)
+	}
+	if got := quotaWindow("3p-5h"); got != "5h" {
+		t.Fatalf("quotaWindow(3p-5h) = %q, want 5h", got)
+	}
+	if got := quotaWindow("other"); got != "quota" {
+		t.Fatalf("quotaWindow(other) = %q, want quota", got)
+	}
+
+	payloadJSON := `{
+  "agent_state": "working",
+  "product": "antigravity",
+  "received_at": "2026-09-06T15:00:00Z",
+  "quota": {
+    "gemini-5h": {
+      "remaining_fraction": 0.10,
+      "reset_time": "2026-09-06T19:00:00Z"
+    }
+  }
+}`
+	path := filepath.Join(t.TempDir(), "antigravity-status.json")
+	if err := os.WriteFile(path, []byte(payloadJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "antigravity",
+		Provider: "antigravity",
+		ProviderPaths: map[string]string{
+			"status_file": path,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+
+	if got := snap.Metrics["quota"].Window; got != "5h" {
+		t.Fatalf("quota window = %q, want 5h", got)
+	}
+
+	core.ApplyQuotaForecast(&snap)
+	if _, ok := snap.Metrics["quota_runout_hours"]; !ok {
+		t.Fatal("expected quota_runout_hours metric to be derived")
+	}
+	runout := *snap.Metrics["quota_runout_hours"].Used
+	if runout <= 0 || runout > 0.2 {
+		t.Fatalf("quota_runout_hours = %v, want ~0.11h", runout)
+	}
+}
