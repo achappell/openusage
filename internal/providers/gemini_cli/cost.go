@@ -28,16 +28,20 @@ func estimateUsageCost(model string, delta tokenUsage) float64 {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), priceLookupTimeout)
 	defer cancel()
-	// contextLen is the request's prompt size (input + cached input). Gemini
-	// charges higher rates above 128k/200k context, so feed it to the pricing
-	// layer to pick the right tier override instead of the base rate.
-	ctxLen := delta.InputTokens + delta.CachedInputTokens
+	// Gemini reports cachedContentTokenCount as a subset of promptTokenCount
+	// (like Codex/OpenAI), so bill only the uncached slice at the input rate.
+	// See issue #360.
+	uncachedInput := delta.InputTokens - delta.CachedInputTokens
+	if uncachedInput < 0 {
+		uncachedInput = 0
+	}
+	ctxLen := delta.InputTokens
 	p, err := priceLookup(ctx, model, ctxLen)
 	if err != nil || p == nil {
 		return 0
 	}
 	return pricing.Estimate(p, ctxLen, pricing.Usage{
-		InputTokens:     delta.InputTokens,
+		InputTokens:     uncachedInput,
 		OutputTokens:    delta.OutputTokens,
 		CacheReadTokens: delta.CachedInputTokens,
 		ReasoningTokens: delta.ReasoningTokens,
