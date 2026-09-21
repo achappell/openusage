@@ -66,6 +66,37 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 		var previous tokenUsage
 		var hasPrevious bool
 		var countedSession bool
+		// Buffer early token_counts that occur before any model is known
+		// (e.g., 2026/08/29 10.8M unknown where first token_count at ordinal 5
+		// precedes turn_context at 8). Flush to the first real model so
+		// Model Burn doesn't show 17M unknown for anyone upstream.
+		var pendingDeltas []tokenUsage
+		var pendingDays []string
+		var firstRealModel string
+		flushPending := func(realModel string) {
+			if len(pendingDeltas) == 0 || realModel == "" || realModel == "unknown" {
+				return
+			}
+			realName := normalizeModelName(realModel)
+			for i, d := range pendingDeltas {
+				day := pendingDays[i]
+				addUsage(modelTotals, realName, d)
+				addDailyUsage(modelDaily, realName, day, float64(d.TotalTokens))
+				cost := estimateUsageCost(realModel, d)
+				if cost > 0 {
+					modelCost[realName] += cost
+					totalCostUSD += cost
+					if day != "" {
+						dailyCost[day] += cost
+					}
+					if day == today {
+						todayCostUSD += cost
+					}
+				}
+			}
+			pendingDeltas = nil
+			pendingDays = nil
+		}
 		if err := walkSessionFile(path, func(record sessionLine) error {
 			switch {
 			case record.SessionMeta != nil:
@@ -74,11 +105,19 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 				// longer write an explicit model to the header; the explicit
 				// fields still win when present.
 				if m := core.FirstNonEmpty(record.SessionMeta.Model, record.SessionMeta.ModelID, record.SessionMeta.ProvenanceModel()); m != "" {
+					if firstRealModel == "" {
+						firstRealModel = m
+						flushPending(m)
+					}
 					sessionDefaultModel = m
 					currentModel = m
 				}
 			case record.TurnContext != nil:
 				if m := core.FirstNonEmpty(record.TurnContext.Model, record.TurnContext.ModelID); strings.TrimSpace(m) != "" {
+					if firstRealModel == "" {
+						firstRealModel = m
+						flushPending(m)
+					}
 					sessionDefaultModel = m
 					currentModel = m
 				}
@@ -86,6 +125,19 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 				payload := record.EventPayload
 				if payload.Type == "user_message" {
 					promptCount++
+					return nil
+				}
+				if payload.Type == "thread_settings_applied" {
+					if ts := payload.ThreadSettings; ts != nil {
+						if m := core.FirstNonEmpty(ts.Model, ts.ModelID); strings.TrimSpace(m) != "" {
+							if firstRealModel == "" {
+								firstRealModel = m
+								flushPending(m)
+							}
+							sessionDefaultModel = m
+							currentModel = m
+						}
+					}
 					return nil
 				}
 				if payload.Type != "token_count" || payload.Info == nil {
@@ -120,6 +172,40 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 				day := dayFromTimestamp(record.Timestamp)
 				if day == "" {
 					day = defaultDay
+				}
+
+				// Buffer early unknowns until first real model appears, so
+				// Model Burn doesn't show 17M unknown for anyone upstream.
+				if modelName == "unknown" {
+					if firstRealModel != "" {
+						// Already have a real model, flush pending + this to it
+						pendingDeltas = append(pendingDeltas, delta)
+						pendingDays = append(pendingDays, day)
+						flushPending(firstRealModel)
+					} else {
+						pendingDeltas = append(pendingDeltas, delta)
+						pendingDays = append(pendingDays, day)
+					}
+					// Still count non-model aggregates
+					addUsage(clientTotals, clientName, delta)
+					addDailyUsage(clientDaily, clientName, day, float64(delta.TotalTokens))
+					addDailyUsage(interfaceDaily, clientInterfaceBucket(clientName), day, 1)
+					dailyTokenTotals[day] += float64(delta.TotalTokens)
+					dailyRequestTotals[day]++
+					clientRequests[clientName]++
+					totalRequests++
+					if day == today {
+						requestsToday++
+					}
+					if !countedSession {
+						clientSessions[clientName]++
+						countedSession = true
+					}
+					return nil
+				}
+				if len(pendingDeltas) > 0 && firstRealModel == "" {
+					firstRealModel = currentModel
+					flushPending(currentModel)
 				}
 
 				addUsage(modelTotals, modelName, delta)
@@ -184,6 +270,14 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 			return nil
 		}); err != nil {
 			return fmt.Errorf("read codex session file %s: %w", path, err)
+		}
+		// Flush any remaining unknown (file never got a real model)
+		if len(pendingDeltas) > 0 {
+			for i, d := range pendingDeltas {
+				day := pendingDays[i]
+				addUsage(modelTotals, "unknown", d)
+				addDailyUsage(modelDaily, "unknown", day, float64(d.TotalTokens))
+			}
 		}
 	}
 

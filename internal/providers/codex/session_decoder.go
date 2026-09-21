@@ -25,6 +25,15 @@ type eventPayload struct {
 	// from the session header. Codex emits either tag depending on version.
 	Model   string `json:"model,omitempty"`
 	ModelID string `json:"model_id,omitempty"`
+	// ThreadSettings is present on payload.type == "thread_settings_applied"
+	// since Codex CLI 0.153, which stopped writing model to session_meta and
+	// turn_context. Example: payload.thread_settings.model == "gpt-6-astra".
+	ThreadSettings *threadSettings `json:"thread_settings,omitempty"`
+}
+
+type threadSettings struct {
+	Model   string `json:"model,omitempty"`
+	ModelID string `json:"model_id,omitempty"`
 }
 
 type tokenInfo struct {
@@ -138,7 +147,18 @@ func walkSessionFileRange(path string, byteOffset int64, endOffset int64, startL
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > maxScannerBufferSize {
-			return nextOffset, lineNumber, fmt.Errorf("codex session line exceeds %d bytes", maxScannerBufferSize)
+			// Skip oversized lines (e.g., compacted history with huge prior conversation
+			// like 13.6M in 2026/08/13 rollout) instead of failing the whole file,
+			// so token counts for other lines still contribute to Model Burn.
+			nextOffset += int64(len(line))
+			lineNumber++
+			if readErr == io.EOF {
+				return nextOffset, lineNumber, nil
+			}
+			if readErr != nil {
+				return nextOffset, lineNumber, readErr
+			}
+			continue
 		}
 		if len(line) == 0 && readErr == io.EOF {
 			return nextOffset, lineNumber, nil

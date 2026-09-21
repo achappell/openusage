@@ -422,6 +422,15 @@ func applyTelemetryTurnContext(state *telemetryParserState, turn *turnContextPay
 	}
 }
 
+func applyTelemetryThreadSettings(state *telemetryParserState, payload *eventPayload) {
+	if state == nil || payload == nil || payload.ThreadSettings == nil {
+		return
+	}
+	if m := core.FirstNonEmpty(payload.ThreadSettings.Model, payload.ThreadSettings.ModelID); strings.TrimSpace(m) != "" {
+		state.model = strings.TrimSpace(m)
+	}
+}
+
 func parseTelemetrySessionFileFrom(path string, byteOffset int64, lineNumber int, state *telemetryParserState) ([]shared.TelemetryEvent, int64, int, error) {
 	if state == nil {
 		state = newTelemetryParserState(path)
@@ -429,14 +438,38 @@ func parseTelemetrySessionFileFrom(path string, byteOffset int64, lineNumber int
 	toolByCallID := make(map[string]int)
 
 	var out []shared.TelemetryEvent
+	var pending []*shared.TelemetryEvent
+	flushPending := func(realModel string) {
+		if len(pending) == 0 || strings.TrimSpace(realModel) == "" {
+			return
+		}
+		for _, ev := range pending {
+			ev.ModelRaw = strings.TrimSpace(realModel)
+			out = append(out, *ev)
+		}
+		pending = nil
+	}
 	nextOffset, nextLineNumber, err := walkSessionFileFrom(path, byteOffset, lineNumber, func(record sessionLine) error {
 		switch {
 		case record.SessionMeta != nil:
 			applyTelemetrySessionMeta(state, record.SessionMeta)
+			if strings.TrimSpace(state.model) != "" && len(pending) > 0 {
+				flushPending(state.model)
+			}
 		case record.TurnContext != nil:
 			applyTelemetryTurnContext(state, record.TurnContext)
+			if strings.TrimSpace(state.model) != "" && len(pending) > 0 {
+				flushPending(state.model)
+			}
 		case record.EventPayload != nil:
 			payload := record.EventPayload
+			if payload.Type == "thread_settings_applied" {
+				applyTelemetryThreadSettings(state, payload)
+				if strings.TrimSpace(state.model) != "" && len(pending) > 0 {
+					flushPending(state.model)
+				}
+				return nil
+			}
 			if payload.Type != "token_count" || payload.Info == nil {
 				return nil
 			}
@@ -479,6 +512,45 @@ func parseTelemetrySessionFileFrom(path string, byteOffset int64, lineNumber int
 			eventModel := state.model
 			if m := core.FirstNonEmpty(payload.Model, payload.ModelID); strings.TrimSpace(m) != "" {
 				eventModel = strings.TrimSpace(m)
+			}
+			if strings.TrimSpace(eventModel) == "" {
+				// Buffer early unknowns (first token_counts before any
+				// turn_context/thread_settings) and flush to first real model
+				ev := shared.TelemetryEvent{
+					SchemaVersion: "codex_session_v1",
+					Channel:       shared.TelemetryChannelJSONL,
+					OccurredAt:    occurredAt,
+					AccountID:     "codex",
+					WorkspaceID:   state.workspaceID,
+					SessionID:     state.sessionID,
+					TurnID:        turnID,
+					MessageID:     messageID,
+					ProviderID:    codexTelemetryProviderID,
+					AgentName:     "codex",
+					EventType:     shared.TelemetryEventTypeMessageUsage,
+					ModelRaw:      eventModel,
+					TokenUsage: core.TokenUsage{
+						InputTokens:     core.Int64Ptr(int64(delta.InputTokens)),
+						OutputTokens:    core.Int64Ptr(int64(delta.OutputTokens)),
+						ReasoningTokens: core.Int64Ptr(int64(delta.ReasoningOutputTokens)),
+						CacheReadTokens: core.Int64Ptr(int64(delta.CachedInputTokens)),
+						TotalTokens:     core.Int64Ptr(int64(delta.TotalTokens)),
+					},
+					Status: shared.TelemetryStatusOK,
+					Payload: map[string]any{
+						"source_file":       path,
+						"line":              record.LineNumber,
+						"upstream_provider": state.upstreamProviderID,
+						"client":            state.clientName,
+						"client_source":     state.clientSource,
+						"client_originator": state.clientOriginator,
+					},
+				}
+				pending = append(pending, &ev)
+				return nil
+			}
+			if len(pending) > 0 {
+				flushPending(eventModel)
 			}
 
 			out = append(out, shared.TelemetryEvent{
@@ -588,6 +660,14 @@ func parseTelemetrySessionFileFrom(path string, byteOffset int64, lineNumber int
 		}
 		return nil
 	})
+	if len(pending) > 0 {
+		for _, ev := range pending {
+			if strings.TrimSpace(ev.ModelRaw) == "" {
+				ev.ModelRaw = "unknown"
+			}
+			out = append(out, *ev)
+		}
+	}
 	if err != nil {
 		return out, nextOffset, nextLineNumber, err
 	}
