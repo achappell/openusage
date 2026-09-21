@@ -52,7 +52,7 @@ func thousands(n int) string {
 
 // Narrate renders facts into a compact status label and severity band.
 func Narrate(f Facts, now time.Time) (string, Severity) {
-	severity := severityFor(f)
+	severity := severityFor(f, now)
 
 	var resetLabel string
 	if f.ResetAt != nil {
@@ -79,7 +79,16 @@ func Narrate(f Facts, now time.Time) (string, Severity) {
 	}
 
 	if f.PctRemaining != nil {
-		pct := fmt.Sprintf("%.0f%% left", *f.PctRemaining)
+		// Not on track to run out before the reset: narrate the reserve that
+		// will still be left once the reset hits, not the instantaneous
+		// remaining percentage right now.
+		displayPct := *f.PctRemaining
+		label := "left"
+		if projected, ok := projectedRemainingAtReset(f, now); ok {
+			displayPct = projected
+			label = "reserve"
+		}
+		pct := fmt.Sprintf("%.0f%% %s", displayPct, label)
 		if resetLabel != "" {
 			return pct + "/reset " + resetLabel, severity
 		}
@@ -92,21 +101,54 @@ func Narrate(f Facts, now time.Time) (string, Severity) {
 	return "quota unavailable", SeverityWarn
 }
 
-func severityFor(f Facts) Severity {
+// projectedRemainingAtReset extrapolates the current burn rate (implied by
+// PctRemaining depleting to zero at RunoutAt) forward to ResetAt, giving the
+// reserve percentage that will be left when the window rolls over. Only
+// applicable once the runout is known and lands after the reset; callers
+// fall back to the instantaneous PctRemaining otherwise.
+func projectedRemainingAtReset(f Facts, now time.Time) (float64, bool) {
+	if f.PctRemaining == nil || f.RunoutAt == nil || f.ResetAt == nil {
+		return 0, false
+	}
+	hoursToRunout := f.RunoutAt.Sub(now).Hours()
+	hoursToReset := f.ResetAt.Sub(now).Hours()
+	if hoursToRunout <= 0 || hoursToReset <= 0 {
+		return 0, false
+	}
+	projected := *f.PctRemaining * (1 - hoursToReset/hoursToRunout)
+	switch {
+	case projected < 0:
+		projected = 0
+	case projected > *f.PctRemaining:
+		projected = *f.PctRemaining
+	}
+	return projected, true
+}
+
+func severityFor(f Facts, now time.Time) Severity {
 	if f.AtCap {
 		return SeverityBad
 	}
 	if f.PctRemaining == nil {
 		return SeverityWarn
 	}
-	switch {
-	case *f.PctRemaining <= 10:
+	if *f.PctRemaining <= 10 {
+		// Immediate danger right now outranks any reset-time forecast.
 		return SeverityBad
-	case f.RunoutAt != nil && f.RunoutBeforeReset:
+	}
+	if f.RunoutAt != nil && f.RunoutBeforeReset {
 		// A forecasted exhaustion before the reset is actionable even when the
 		// instantaneous remaining percentage still looks healthy.
 		return SeverityWarn
-	case *f.PctRemaining <= 25:
+	}
+	remaining := *f.PctRemaining
+	if projected, ok := projectedRemainingAtReset(f, now); ok {
+		remaining = projected
+	}
+	switch {
+	case remaining <= 10:
+		return SeverityBad
+	case remaining <= 25:
 		return SeverityWarn
 	default:
 		return SeverityGood
