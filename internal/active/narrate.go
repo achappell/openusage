@@ -83,10 +83,12 @@ func Narrate(f Facts, now time.Time) (string, Severity) {
 		// will still be left once the reset hits, not the instantaneous
 		// remaining percentage right now.
 		displayPct := *f.PctRemaining
+		label := "left"
 		if projected, ok := projectedRemainingAtReset(f, now); ok {
 			displayPct = projected
+			label = "reserve"
 		}
-		pct := fmt.Sprintf("%.0f%% left", displayPct)
+		pct := fmt.Sprintf("%.0f%% %s", displayPct, label)
 		if resetLabel != "" {
 			return pct + "/reset " + resetLabel, severity
 		}

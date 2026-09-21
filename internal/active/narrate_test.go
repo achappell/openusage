@@ -91,7 +91,7 @@ func TestNarrateLabelGrammar(t *testing.T) {
 				RunoutBeforeReset: false,
 				PctRemaining:      pct(37),
 			},
-			wantLabel: "37% left/reset 2h", wantSeverity: SeverityGood,
+			wantLabel: "37% reserve/reset 2h", wantSeverity: SeverityGood,
 		},
 		{
 			name: "not running out narrates the reserve at reset, not the instantaneous remainder",
@@ -103,7 +103,7 @@ func TestNarrateLabelGrammar(t *testing.T) {
 			},
 			// 50h to runout, 10h to reset: burn rate depletes 20% of the
 			// remaining 80% before reset, leaving 64% in reserve.
-			wantLabel: "64% left/reset 10h", wantSeverity: SeverityGood,
+			wantLabel: "64% reserve/reset 10h", wantSeverity: SeverityGood,
 		},
 		{
 			name: "projected reserve at reset can cross into warn even though the instantaneous remainder looks fine",
@@ -115,7 +115,7 @@ func TestNarrateLabelGrammar(t *testing.T) {
 			},
 			// 14h to runout, 10h to reset: burn rate depletes ~71% of the
 			// remaining 50% before reset, leaving ~14% in reserve.
-			wantLabel: "14% left/reset 10h", wantSeverity: SeverityWarn,
+			wantLabel: "14% reserve/reset 10h", wantSeverity: SeverityWarn,
 		},
 		{
 			name:         "low remaining is bad",
