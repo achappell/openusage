@@ -28,16 +28,22 @@ func estimateUsageCost(model string, delta tokenUsage) float64 {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), priceLookupTimeout)
 	defer cancel()
-	// contextLen is the request's prompt size (input + cached input). Pricing
-	// applies higher long-context tier rates above the model's breakpoint, so
-	// feed it instead of always charging the base rate.
-	ctxLen := delta.InputTokens + delta.CachedInputTokens
+	// Codex reports cached_input_tokens as a subset of input_tokens (OpenAI
+	// semantics: total = input + output), so the cached portion must only be
+	// billed at the cache-read rate. See issue #360.
+	uncachedInput := delta.InputTokens - delta.CachedInputTokens
+	if uncachedInput < 0 {
+		uncachedInput = 0
+	}
+	// contextLen is the real prompt size (input_tokens already includes the
+	// cached slice), not input+cache.
+	ctxLen := delta.InputTokens
 	p, err := priceLookup(ctx, model, ctxLen)
 	if err != nil || p == nil {
 		return 0
 	}
 	return pricing.Estimate(p, ctxLen, pricing.Usage{
-		InputTokens:     delta.InputTokens,
+		InputTokens:     uncachedInput,
 		OutputTokens:    delta.OutputTokens,
 		CacheReadTokens: delta.CachedInputTokens,
 		ReasoningTokens: delta.ReasoningOutputTokens,
