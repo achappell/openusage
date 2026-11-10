@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/janekbaraniewski/openusage/internal/ccevents"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/export"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
@@ -332,9 +333,34 @@ func writeJSONObjectWithBackup(path string, cfg map[string]any) error {
 
 func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) error {
 	in := readStatuslineInput(stdin)
+	// Quota is account-scoped and may expire or fail independently of the
+	// transcript. Never replay a rendered quota from the statusline cache.
+	if opts.segmentEnabled("window5h") {
+		fmt.Fprintln(stdout, statuslineRender(in, opts))
+		return nil
+	}
 
+	// Reuse non-quota renders for unchanged inputs, avoiding repeated log
+	// parsing. Any cache error falls through to a normal render.
+	key := statuslineCacheKey(in, opts)
+	if line, ok := readStatuslineCache(in.SessionID, key, time.Now()); ok {
+		fmt.Fprintln(stdout, line)
+		return nil
+	}
+
+	line := statuslineRender(in, opts)
+	writeStatuslineCache(in.SessionID, key, line)
+	fmt.Fprintln(stdout, line)
+	return nil
+}
+
+// statuslineRender does the full (uncached) render. It is a variable so tests
+// can count how often the slow path runs.
+var statuslineRender = renderStatuslineFresh
+
+func renderStatuslineFresh(in statuslineInput, opts statuslineOptions) string {
 	// The 5h usage-window % is rate-limit data the daemon collects; resolve it
-	// only when the segment is shown (cache-first, so most renders are instant).
+	// on every render when the segment is shown.
 	fiveHourPct, haveFiveHour := 0.0, false
 	if opts.segmentEnabled("window5h") {
 		fiveHourPct, haveFiveHour = fiveHourUsagePct()
@@ -344,12 +370,14 @@ func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) er
 	// log-derived segment is shown (e.g. a window5h-only statusline).
 	var events []report.Event
 	if statuslineNeedsLogs(opts) {
-		if evs, err := claudeCodeConversationEvents(claude_code.ParseCostMode(opts.mode), opts.offline); err == nil {
+		// Claude Code re-runs the statusline on every message, so only read
+		// logs touched today or within the block lookback (plus this
+		// session's) instead of the full history.
+		if evs, err := ccevents.Recent(claude_code.ParseCostMode(opts.mode), opts.offline, ccevents.TodaySince(time.Now()), in.SessionID); err == nil {
 			events = evs
 		}
 	}
-	fmt.Fprintln(stdout, renderStatusline(in, events, fiveHourPct, haveFiveHour, time.Now(), opts))
-	return nil
+	return renderStatusline(in, events, fiveHourPct, haveFiveHour, time.Now(), opts)
 }
 
 // statuslineNeedsLogs reports whether any shown segment is derived from the
@@ -363,32 +391,10 @@ func statuslineNeedsLogs(opts statuslineOptions) bool {
 	return false
 }
 
-const (
-	// How long a cached 5h value is served without touching the daemon. The 5h
-	// window moves slowly, so a short staleness keeps renders instant while
-	// staying fresh. The cache is a single shared file, so parallel sessions
-	// share one refresh rather than each hammering the daemon.
-	fiveHourRefreshInterval = 30 * time.Second
-	// Beyond this, a stale cache is no longer trusted (daemon presumed down).
-	fiveHourMaxAge = 15 * time.Minute
-)
-
-// fiveHourUsagePct resolves the 5h usage-window % cache-first: serve a fresh
-// cached value instantly; otherwise ask the daemon (caching the result); if the
-// daemon is slow/down, fall back to the last-good value within fiveHourMaxAge.
-// Never makes a network call and never blocks longer than the daemon timeout.
+// fiveHourUsagePct uses only the daemon's uniquely identified, fresh sample.
+// A daemon failure or ambiguous account must not revive a cached quota.
 func fiveHourUsagePct() (float64, bool) {
-	if pct, age, ok := claude_code.ReadFiveHourCache(); ok && age < fiveHourRefreshInterval {
-		return pct, true
-	}
-	if pct, ok := fetchFiveHourPctFromDaemon(); ok {
-		claude_code.WriteFiveHourCache(pct)
-		return pct, true
-	}
-	if pct, age, ok := claude_code.ReadFiveHourCache(); ok && age < fiveHourMaxAge {
-		return pct, true
-	}
-	return 0, false
+	return fetchFiveHourPctFromDaemon()
 }
 
 // fetchFiveHourPctFromDaemon reads claude_code's usage_five_hour from the
@@ -401,20 +407,33 @@ func fetchFiveHourPctFromDaemon() (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	for _, s := range snaps {
-		if s.ProviderID != "claude_code" {
+	return fiveHourFromSnapshots(snaps, time.Now())
+}
+
+func fiveHourFromSnapshots(snaps []core.UsageSnapshot, now time.Time) (float64, bool) {
+	var match *core.UsageSnapshot
+	for i := range snaps {
+		if snaps[i].ProviderID != "claude_code" {
 			continue
 		}
-		if m, ok := s.Metrics["usage_five_hour"]; ok && m.Used != nil {
-			return *m.Used, true
+		if match != nil {
+			return 0, false
 		}
+		match = &snaps[i]
+	}
+	if match == nil || match.AccountID == "" ||
+		(match.Status != core.StatusOK && match.Status != core.StatusNearLimit && match.Status != core.StatusLimited) {
+		return 0, false
+	}
+	observed, err := time.Parse(time.RFC3339Nano, match.Attributes["usage_api_observed_at"])
+	if err != nil || observed.After(now) || now.Sub(observed) > 10*time.Minute || !match.Resets["usage_five_hour"].After(now) {
+		return 0, false
+	}
+	if m, ok := match.Metrics["usage_five_hour"]; ok && m.Used != nil && *m.Used >= 0 && *m.Used <= 100 {
+		return *m.Used, true
 	}
 	return 0, false
 }
-
-// The 5h usage cache lives in the claude_code package so the tmux status bar
-// and this statusline share one file and one format — a write from either
-// surface (or the daemon poll) warms the fallback for both.
 
 // readStatuslineInput reads and decodes the stdin payload. A terminal (no pipe)
 // or malformed JSON yields a zero-value input so the command still renders.

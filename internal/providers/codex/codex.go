@@ -41,9 +41,13 @@ type Provider struct {
 	creditDailyMu                sync.Mutex
 	creditDaily                  map[string]dailyCreditUsageCache
 	creditDailyFail              map[string]dailyCreditUsageFailure
-	// creditDailyNow is the clock used for daily-credit cache freshness.
-	// Tests swap it out to advance past the TTL deterministically.
+	// Tests can advance the daily-credit cache clock deterministically.
 	creditDailyNow func() time.Time
+	// Session caches avoid reparsing unchanged history and token counts.
+	sessionFileCacheMu sync.Mutex
+	sessionFileCache   map[string]map[string]*sessionFileCacheEntry
+	latestTokenCacheMu sync.Mutex
+	latestTokenCache   map[string]latestTokenCacheEntry
 }
 
 type telemetryCacheEntry struct {
@@ -295,7 +299,7 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 		return true, nil
 	}
 	sessionsDir := acct.Hint("sessions_dir", filepath.Join(configDir, "sessions"))
-	sessionFiles, err := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	sessionFiles, err := collectSessionFileInfos(sessionsDir)
 	if err != nil {
 		return false, fmt.Errorf("collect codex session files: %w", err)
 	}
@@ -332,6 +336,22 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, nil
 	}
 
+	// Read the version before either concurrent quota request stamps its user agent.
+	versionFile := filepath.Join(configDir, "version.json")
+	if data, err := os.ReadFile(versionFile); err == nil {
+		var ver versionInfo
+		if json.Unmarshal(data, &ver) == nil && ver.LatestVersion != "" {
+			snap.Raw["cli_version"] = ver.LatestVersion
+		}
+	}
+	// Start both quota sources before scanning local history.
+	quotaFetches := p.startCodexQuotaFetches(ctx, acct, configDir, snap)
+	liveResult := <-quotaFetches.live
+	cliResult := <-quotaFetches.cli
+	hasLiveData, liveErr := liveResult.available, liveResult.err
+	hasCLIData := cliResult.available
+	hasLiveWindows := hasCodexQuotaWindows(liveResult.snapshot)
+	hasCLIWindows := hasCodexQuotaWindows(cliResult.snapshot)
 	var hasLocalData bool
 
 	sessionsDir := filepath.Join(configDir, "sessions")
@@ -371,34 +391,29 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		breakdownDone = done
 	}
 
-	// Read the CLI version before any network fetcher: they stamp it into
-	// their User-Agent, so reading it afterwards leaves that header bare.
-	versionFile := filepath.Join(configDir, "version.json")
-	if data, err := os.ReadFile(versionFile); err == nil {
-		var ver versionInfo
-		if json.Unmarshal(data, &ver) == nil && ver.LatestVersion != "" {
-			snap.Raw["cli_version"] = ver.LatestVersion
-		}
+	sessionSource := snap.Raw["rate_limit_source"]
+	if hasLiveWindows || hasCLIWindows {
+		clearRateLimitMetrics(&snap)
 	}
-
-	quotaFetches := p.startCodexQuotaFetches(ctx, acct, configDir, snap)
-	liveResult := <-quotaFetches.live
-	cliResult := <-quotaFetches.cli
-	hasLiveData := liveResult.available
-	liveErr := liveResult.err
 	if liveResult.err != nil {
 		snap.Raw["quota_api_error"] = liveResult.err.Error()
 	}
 	if liveResult.available {
 		mergeCodexQuotaSnapshot(&snap, &liveResult.snapshot, true)
 	}
-
-	hasCLIData := cliResult.available
 	if cliResult.err != nil {
 		snap.Raw["cli_rate_limits_error"] = cliResult.err.Error()
 	}
 	if cliResult.available {
 		mergeCodexQuotaSnapshot(&snap, &cliResult.snapshot, !liveResult.available)
+	}
+	switch {
+	case hasLiveWindows:
+		snap.Raw["rate_limit_source"] = "live"
+	case hasCLIWindows:
+		snap.Raw["rate_limit_source"] = "cli_rpc"
+	case sessionSource != "":
+		snap.Raw["rate_limit_source"] = sessionSource
 	}
 	// This request now has its own snapshot and goroutine. It can complete
 	// while the full session breakdown is still walking local history.
@@ -430,14 +445,14 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	hasData := hasLocalData || hasLiveData || hasCLIData
+	hasData := hasLocalData || hasCLIData || hasLiveData
 	if !hasData {
 		if errors.Is(liveErr, errLiveUsageAuth) {
 			snap.Status = core.StatusAuth
 			snap.Message = "Codex auth required — run `codex login`"
 		} else {
 			snap.Status = core.StatusUnknown
-			snap.Message = "No Codex usage data found"
+			snap.Message = "Quotas unavailable"
 		}
 		return snap, nil
 	}
@@ -449,15 +464,24 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	p.applyRateLimitStatus(&snap)
 
 	switch {
-	case (hasLiveData || hasCLIData) && hasLocalData:
+	case (hasCLIData || hasLiveData) && hasLocalData:
 		snap.Message = "Codex live usage + local session data"
-	case hasLiveData || hasCLIData:
+	case hasCLIData || hasLiveData:
 		snap.Message = "Codex live usage data"
 	default:
 		snap.Message = "Codex CLI session data"
 	}
 
 	return snap, nil
+}
+
+func hasCodexQuotaWindows(snap core.UsageSnapshot) bool {
+	for key, metric := range snap.Metrics {
+		if strings.HasPrefix(key, "rate_limit_") && metric.Used != nil && metric.Window != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Provider) applyRateLimitStatus(snap *core.UsageSnapshot) {

@@ -1,7 +1,6 @@
 package detect
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,8 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -44,6 +44,7 @@ func AutoDetect() Result {
 	detectCursor(&result)
 	detectClaudeCode(&result)
 	detectCodex(&result)
+	detectCommandCode(&result)
 	detectZAICodingHelper(&result)
 	detectOllama(&result)
 	detectAider(&result)
@@ -65,6 +66,7 @@ func AutoDetect() Result {
 	detectOpenClaw(&result)
 	detectPi(&result)
 	detectQwenCLI(&result)
+	detectMuseCode(&result)
 
 	// Phase 2: process env vars. Most authoritative; runs before any
 	// file-based credential adoption so a freshly-set env var always
@@ -83,6 +85,10 @@ func AutoDetect() Result {
 	// the secret value at fetch time.
 	detectMacOSKeychainCredentials(&result)
 	detectCredentialFiles(&result)
+
+	// Phase 5: browser-session credentials for console-only data. Runs
+	// last so it can attach to an account created by any earlier phase.
+	detectOpenCodeConsoleSession(&result)
 
 	return result
 }
@@ -161,15 +167,85 @@ func candidateBinaryDirs() []string {
 	if !customSet {
 		home := homeDir()
 		if home != "" {
-			dirs = append(dirs,
-				filepath.Join(home, ".local", "bin"),
-				filepath.Join(home, "bin"),
-			)
+			dirs = append(dirs, userBinaryDirs(home)...)
 		}
 
-		dirs = append(dirs, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
+		dirs = append(dirs,
+			"/opt/homebrew/bin",
+			"/home/linuxbrew/.linuxbrew/bin",
+			"/usr/local/bin",
+			"/usr/bin",
+			"/bin",
+			"/snap/bin",
+		)
 	}
 	return lo.Uniq(dirs)
+}
+
+// userBinaryDirs lists per-user install locations used by the common
+// package managers for CLI tools (npm, nvm, volta, pnpm, bun, yarn, cargo).
+// The telemetry daemon runs under launchd/systemd with a minimal PATH, so
+// tools installed there are invisible to exec.LookPath in the daemon even
+// though they resolve fine from the user's shell.
+func userBinaryDirs(home string) []string {
+	dirs := []string{
+		filepath.Join(home, ".local", "bin"),
+		filepath.Join(home, "bin"),
+		filepath.Join(home, ".npm-global", "bin"),
+		filepath.Join(home, ".npm-packages", "bin"),
+		filepath.Join(home, ".volta", "bin"),
+		filepath.Join(home, ".bun", "bin"),
+		filepath.Join(home, ".yarn", "bin"),
+		filepath.Join(home, ".local", "share", "pnpm"),
+		filepath.Join(home, "Library", "pnpm"),
+		filepath.Join(home, ".cargo", "bin"),
+		filepath.Join(home, ".local", "share", "fnm", "aliases", "default", "bin"),
+	}
+	if nvmDir := strings.TrimSpace(os.Getenv("NVM_DIR")); nvmDir != "" {
+		dirs = append(dirs, nvmNodeBinDirs(nvmDir)...)
+	}
+	dirs = append(dirs, nvmNodeBinDirs(filepath.Join(home, ".nvm"))...)
+	return dirs
+}
+
+// nvmNodeBinDirs returns <nvmDir>/versions/node/*/bin, newest version first.
+func nvmNodeBinDirs(nvmDir string) []string {
+	matches, err := filepath.Glob(filepath.Join(nvmDir, "versions", "node", "*", "bin"))
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		return compareNodeVersionDirs(matches[i], matches[j]) > 0
+	})
+	return matches
+}
+
+// compareNodeVersionDirs compares two .../vX.Y.Z/bin paths by semantic
+// version. Unparseable components compare as zero.
+func compareNodeVersionDirs(a, b string) int {
+	va := parseNodeVersion(filepath.Base(filepath.Dir(a)))
+	vb := parseNodeVersion(filepath.Base(filepath.Dir(b)))
+	for i := range va {
+		if va[i] != vb[i] {
+			if va[i] > vb[i] {
+				return 1
+			}
+			return -1
+		}
+	}
+	return strings.Compare(a, b)
+}
+
+func parseNodeVersion(name string) [3]int {
+	var out [3]int
+	parts := strings.SplitN(strings.TrimPrefix(name, "v"), ".", 3)
+	for i, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err == nil {
+			out[i] = n
+		}
+	}
+	return out
 }
 
 func isExecutableFile(path string) bool {
@@ -229,6 +305,49 @@ func detectAider(result *Result) {
 	log.Printf("[detect] Found Aider at %s", bin)
 }
 
+// ghDataDir mirrors gh's data directory lookup: GH_DATA_DIR, then
+// XDG_DATA_HOME/gh, then %LocalAppData%/GitHub CLI on Windows, then
+// ~/.local/share/gh.
+func ghDataDir() string {
+	if dir := strings.TrimSpace(os.Getenv("GH_DATA_DIR")); dir != "" {
+		return dir
+	}
+	if dir := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); dir != "" {
+		return filepath.Join(dir, "gh")
+	}
+	if runtime.GOOS == "windows" {
+		if dir := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); dir != "" {
+			return filepath.Join(dir, "GitHub CLI")
+		}
+	}
+	home := homeDir()
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "gh")
+}
+
+// ghCopilotInstallPath returns where `gh copilot` lives on disk without
+// executing anything: the legacy gh-copilot extension, or the Copilot CLI
+// that `gh copilot` downloaded into gh's data dir. It returns "" when
+// neither exists. A copilot binary on PATH is handled by the standalone
+// branch of detectGHCopilot.
+func ghCopilotInstallPath() string {
+	dataDir := ghDataDir()
+	if dataDir == "" {
+		return ""
+	}
+	for _, candidate := range []string{
+		filepath.Join(dataDir, "extensions", "gh-copilot"),
+		filepath.Join(dataDir, "copilot"),
+	} {
+		if dirExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
 func detectGHCopilot(result *Result) {
 	home := homeDir()
 	if home == "" {
@@ -238,18 +357,18 @@ func detectGHCopilot(result *Result) {
 	ghBin := findBinary("gh")
 	ghCopilotOK := false
 
-	// Try gh copilot extension first (existing/deprecated path).
-	// Use a 5-second timeout to prevent hanging if gh CLI is broken,
-	// unauthenticated, or blocked by network/proxy issues.
+	// Look for the gh copilot extension (or the Copilot CLI that gh
+	// downloaded) on disk instead of running `gh copilot --version`: that
+	// takes ~750ms because gh starts the separate copilot binary, newer gh
+	// builds offer to download the CLI when it is missing, and AutoDetect
+	// runs on every daemon start and account resolve.
 	if ghBin != "" {
 		log.Printf("[detect] Found gh CLI at %s", ghBin)
-		ghCtx, ghCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer ghCancel()
-		cmd := exec.CommandContext(ghCtx, ghBin, "copilot", "--version")
-		if err := cmd.Run(); err == nil {
+		if path := ghCopilotInstallPath(); path != "" {
 			ghCopilotOK = true
+			log.Printf("[detect] Found gh copilot at %s", path)
 		} else {
-			log.Printf("[detect] gh copilot extension not installed or timed out: %v", err)
+			log.Printf("[detect] gh copilot extension not installed")
 		}
 	}
 
@@ -464,6 +583,7 @@ var envKeyMapping = []envKeyMappingEntry{
 	{EnvVar: "GOOGLE_API_KEY", Provider: "gemini_api", AccountID: "gemini-google"},
 	{EnvVar: "OLLAMA_API_KEY", Provider: "ollama", AccountID: "ollama-cloud"},
 	{EnvVar: "ALIBABA_CLOUD_API_KEY", Provider: "alibaba_cloud", AccountID: "alibaba_cloud", AiderShortNames: []string{"alibaba", "qwen"}},
+	{EnvVar: "COMMAND_CODE_API_KEY", Provider: "command_code", AccountID: "command_code"},
 }
 
 // envKeyByVar indexes envKeyMapping by env-var name for O(1) lookup. Built

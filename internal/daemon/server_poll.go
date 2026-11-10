@@ -48,7 +48,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 	}
 	started := time.Now()
 
-	accounts, modelNorm, err := LoadAccountsAndNorm()
+	accounts, modelNorm, err := s.cachedAccountsAndNorm(ctx)
 	if err != nil {
 		if s.shouldLog("poll_config_warning", 20*time.Second) {
 			s.warnf("poll_config_warning", "error=%v", err)
@@ -97,25 +97,51 @@ func (s *Service) pollProviders(ctx context.Context) {
 			}
 
 			_, hasDetector := provider.(core.ChangeDetector)
+			// Claude also has a remote source: use the HTTP backoff cap and
+			// do not let unchanged local files suppress scheduled fetches.
+			localOnly := hasDetector && account.Provider != "claude_code"
+
+			// Retry a failed ingest before replacing its snapshot with a new fetch.
+			s.pollStateMu.Lock()
+			state := s.pollState[account.ID]
+			if state != nil && state.hasSnap && state.needsIngest {
+				result := pollProviderResult{accountID: account.ID, snapshot: state.lastSnap, shouldIngest: true}
+				s.pollStateMu.Unlock()
+				results <- result
+				return
+			}
+			s.pollStateMu.Unlock()
 
 			// Adaptive backoff: skip providers that are in a backoff window.
 			configChanged := s.creditLimitOverrideChanged(account)
-			if !configChanged && !s.pollScheduler.ShouldPoll(account.ID, hasDetector) {
+			minimum := time.Duration(0)
+			if account.Provider == "claude_code" {
+				minimum = 30 * time.Second
+				configChanged = false // configuration changes cannot bypass the remote rate limit
+			}
+			if !configChanged && !s.pollScheduler.shouldPoll(account.ID, localOnly, minimum) {
 				s.pollStateMu.Lock()
 				state := s.pollState[account.ID]
-				s.pollStateMu.Unlock()
 				if state != nil && state.hasSnap {
-					results <- pollProviderResult{accountID: account.ID, snapshot: state.lastSnap}
+					result := pollProviderResult{accountID: account.ID, snapshot: state.lastSnap, shouldIngest: state.needsIngest}
+					s.pollStateMu.Unlock()
+					results <- result
 					return
 				}
+				s.pollStateMu.Unlock()
 				// No cached snapshot yet — must fetch.
 			}
 
-			// Check if provider data has changed since last fetch (optional interface).
-			if cached := s.skipUnchangedProvider(provider, account); cached != nil {
-				s.pollScheduler.RecordPoll(account.ID, false)
-				results <- pollProviderResult{accountID: account.ID, snapshot: *cached}
-				return
+			// Local-only providers can skip a fetch when their files are unchanged.
+			if localOnly {
+				if cached := s.skipUnchangedProvider(provider, account); cached != nil {
+					s.pollScheduler.RecordPoll(account.ID, false)
+					s.pollStateMu.Lock()
+					pending := s.pollState[account.ID].needsIngest
+					s.pollStateMu.Unlock()
+					results <- pollProviderResult{accountID: account.ID, snapshot: *cached, shouldIngest: pending}
+					return
+				}
 			}
 
 			fetchCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -136,18 +162,29 @@ func (s *Service) pollProviders(ctx context.Context) {
 			// Track whether data actually changed for adaptive backoff.
 			changed := s.pollScheduler.SnapshotChanged(account.ID, snap)
 			s.pollScheduler.RecordPoll(account.ID, changed)
+			s.pollScheduler.RecordOutcome(account.ID, snap)
 
-			// Record successful fetch for future change detection.
+			// Persist fresh remote observations even when their values are
+			// unchanged, and retain pending work after an ingest failure.
+			_, observedErr := time.Parse(time.RFC3339Nano, snap.Attributes["usage_api_observed_at"])
+			freshClaude := account.Provider == "claude_code" && fetchErr == nil && observedErr == nil
 			s.pollStateMu.Lock()
+			pending := changed || freshClaude
+			var ingestedVersion uint64
+			if previous := s.pollState[account.ID]; previous != nil {
+				ingestedVersion = previous.ingestedVersion
+			}
 			s.pollState[account.ID] = &providerPollState{
 				lastFetchAt:         s.now(),
 				lastSnap:            snap,
 				creditLimitOverride: cloneCreditLimitOverride(account.CreditLimitOverride),
+				needsIngest:         pending,
+				ingestedVersion:     ingestedVersion,
 				hasSnap:             true,
 			}
 			s.pollStateMu.Unlock()
 
-			results <- pollProviderResult{accountID: account.ID, snapshot: snap, shouldIngest: changed}
+			results <- pollProviderResult{accountID: account.ID, snapshot: snap, shouldIngest: pending}
 		}(acct)
 	}
 
@@ -183,7 +220,18 @@ func (s *Service) pollProviders(ctx context.Context) {
 		s.warnf("poll_ingest_warning", "error=%v", ingestErr)
 	}
 	if ingestErr == nil && len(changedSnapshots) > 0 {
+		s.pollStateMu.Lock()
 		s.markDataIngested()
+		ingestedVersion := s.dataVersion.Load()
+		for accountID := range changedSnapshots {
+			if state := s.pollState[accountID]; state != nil {
+				state.needsIngest = false
+				if state.lastSnap.ProviderID == "claude_code" {
+					state.ingestedVersion = ingestedVersion
+				}
+			}
+		}
+		s.pollStateMu.Unlock()
 	}
 
 	durationMs := time.Since(started).Milliseconds()

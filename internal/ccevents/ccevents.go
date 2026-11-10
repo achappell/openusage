@@ -5,6 +5,9 @@
 package ccevents
 
 import (
+	"strings"
+	"time"
+
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 	"github.com/janekbaraniewski/openusage/internal/report"
 )
@@ -13,10 +16,57 @@ import (
 // them as a unified report.Event slice. offline=true forces the embedded
 // pricing table, skipping any network lookup.
 func Conversations(mode claude_code.CostMode, offline bool) ([]report.Event, error) {
-	stats, err := claude_code.AggregateConversations(claude_code.AggregateOptions{
-		Mode:    mode,
-		Offline: offline,
-	})
+	return aggregate(claude_code.AggregateOptions{Mode: mode, Offline: offline})
+}
+
+// BlockLookback is how far back the active 5h billing block needs history.
+// A block's start depends on the events before it (a new block opens 5h after
+// the previous block's start or after a 5h idle gap), so two block lengths
+// recover the previous block's phase in all but round-the-clock usage.
+const BlockLookback = 10 * time.Hour
+
+// BlockSince is the earliest log mtime needed to compute the active block.
+func BlockSince(now time.Time) time.Time {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return now.Add(-BlockLookback)
+}
+
+// TodaySince is the earliest log mtime needed for "today" totals and the
+// active block: whichever of local midnight and BlockSince is earlier. Every
+// event since midnight lives in a file modified since midnight, so today's
+// totals are exact.
+func TodaySince(now time.Time) time.Time {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	if block := BlockSince(now); block.Before(midnight) {
+		return block
+	}
+	return midnight
+}
+
+// Recent is Conversations restricted to log files modified at or after
+// since, plus any file whose path contains sessionID (the active session's
+// transcript and subagent logs). It is meant for the per-render callers
+// (statusline, tmux), which previously re-parsed the entire history on every
+// render. Pick since with TodaySince or BlockSince to match what is shown.
+func Recent(mode claude_code.CostMode, offline bool, since time.Time, sessionID string) ([]report.Event, error) {
+	opts := claude_code.AggregateOptions{
+		Mode:          mode,
+		Offline:       offline,
+		ModifiedSince: since,
+	}
+	if sid := strings.TrimSpace(sessionID); sid != "" {
+		opts.KeepPath = func(p string) bool { return strings.Contains(p, sid) }
+	}
+	return aggregate(opts)
+}
+
+func aggregate(opts claude_code.AggregateOptions) ([]report.Event, error) {
+	stats, err := claude_code.AggregateConversations(opts)
 	if err != nil {
 		return nil, err
 	}

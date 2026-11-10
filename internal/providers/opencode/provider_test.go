@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -328,5 +329,173 @@ func TestFetch_ConsoleDoubleFailure_DoesNotFabricateZeroBalance(t *testing.T) {
 	}
 	if _, ok := snap.Diagnostics["opencode_console_auth_error"]; !ok {
 		t.Errorf("expected opencode_console_auth_error diagnostic, got diagnostics=%+v", snap.Diagnostics)
+	}
+}
+
+func TestFetch_ConsoleShapeChange_DoesNotFabricateZeroBalance(t *testing.T) {
+	origLoadStoredSession := loadStoredSession
+	origNewConsoleClient := newConsoleClient
+	t.Cleanup(func() {
+		loadStoredSession = origLoadStoredSession
+		newConsoleClient = origNewConsoleClient
+	})
+
+	loadStoredSession = func(string) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{
+			Value:         "test-cookie-value",
+			CookieName:    "auth",
+			SourceBrowser: "firefox",
+		}, true, nil
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/workspace/wrk_test/go" {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<html><body>usage layout changed</body></html>"))
+			return
+		}
+		if r.URL.Path == "/_server" {
+			http.Error(w, "billing fallback unavailable", http.StatusInternalServerError)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	newConsoleClient = func(cookieValue, cookieName, workspaceID string) *ConsoleClient {
+		client := NewConsoleClient(cookieValue, cookieName, workspaceID)
+		client.baseURL = server.URL
+		return client
+	}
+
+	acct := core.AccountConfig{
+		ID:        "opencode-shape-change",
+		Provider:  "opencode",
+		APIKeyEnv: "TEST_OPENCODE_MISSING_SHAPE",
+		BrowserCookie: &core.BrowserCookieRef{
+			Domain:        ".opencode.ai",
+			CookieName:    "auth",
+			SourceBrowser: "firefox",
+		},
+	}
+	acct.SetHint("opencode_workspace_id", "wrk_test")
+
+	snap, err := New().Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch error: %v", err)
+	}
+	if snap.Status != core.StatusAuth {
+		t.Fatalf("status = %s, want AUTH for changed page shape (msg=%q)", snap.Status, snap.Message)
+	}
+	if _, ok := snap.Metrics["console_balance"]; ok {
+		t.Fatalf("console_balance metric present for changed page shape: %+v", snap.Metrics["console_balance"])
+	}
+	if snap.Raw["console_error"] == "" {
+		t.Errorf("expected console_error diagnostic for changed page shape, got raw=%v", snap.Raw)
+	}
+}
+
+func TestFetch_ConsoleUsageResetLinks(t *testing.T) {
+	origLoadStoredSession := loadStoredSession
+	origNewConsoleClient := newConsoleClient
+	t.Cleanup(func() {
+		loadStoredSession = origLoadStoredSession
+		newConsoleClient = origNewConsoleClient
+	})
+	loadStoredSession = func(string) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{Value: "test-cookie", CookieName: "auth"}, true, nil
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/workspace/wrk_test/go" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`<script>self.$R=self.$R||[];` +
+			`billing.get["wrk_test"]}=$R[1]=$R[2]($R[3]={balance:100000000});` +
+			`rollingUsage:$R[4]={resetInSec:1800,usagePercent:0};` +
+			`weeklyUsage:$R[5]={resetInSec:200000,usagePercent:12.5};` +
+			`monthlyUsage:$R[6]={resetInSec:900000,usagePercent:0};</script>`))
+	}))
+	defer server.Close()
+	newConsoleClient = func(value, name, workspace string) *ConsoleClient {
+		client := NewConsoleClient(value, name, workspace)
+		client.baseURL = server.URL
+		return client
+	}
+	acct := core.AccountConfig{
+		ID: "opencode-reset", Provider: "opencode", APIKeyEnv: "TEST_OPENCODE_MISSING_RESET",
+		BrowserCookie: &core.BrowserCookieRef{Domain: ".opencode.ai", CookieName: "auth"},
+	}
+	acct.SetHint("opencode_workspace_id", "wrk_test")
+	snap, err := New().Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch error: %v", err)
+	}
+	for _, tc := range []struct {
+		metric, reset string
+		used          float64
+		seconds       int
+	}{
+		{"rolling_usage", "rolling_usage_reset", 0, 1800},
+		{"weekly_usage", "weekly_usage_reset", 12.5, 200000},
+		{"monthly_usage_pct", "monthly_usage_pct_reset", 0, 900000},
+	} {
+		metric, ok := snap.Metrics[tc.metric]
+		if !ok || metric.Used == nil || *metric.Used != tc.used || metric.ResetKey != tc.reset {
+			t.Errorf("%s = %+v, want used %v and reset key %q", tc.metric, metric, tc.used, tc.reset)
+		}
+		if got, want := snap.Resets[tc.reset], snap.Timestamp.Add(time.Duration(tc.seconds)*time.Second); !got.Equal(want) {
+			t.Errorf("%s = %v, want %v", tc.reset, got, want)
+		}
+	}
+}
+
+func TestFetch_ConsoleShapeChangeFallsBackToBillingRPC(t *testing.T) {
+	origLoadStoredSession := loadStoredSession
+	origNewConsoleClient := newConsoleClient
+	t.Cleanup(func() {
+		loadStoredSession = origLoadStoredSession
+		newConsoleClient = origNewConsoleClient
+	})
+	loadStoredSession = func(string) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{Value: "test-cookie", CookieName: "auth"}, true, nil
+	}
+	billing := loadFixture(t, "seroval_c83b78a61468.txt")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/workspace/wrk_test/go":
+			_, _ = w.Write([]byte(`<script>self.$R=self.$R||[];usagePage:{shape:"changed"}</script>`))
+		case "/_server":
+			if r.URL.Query().Get("id") != rpcBillingInfoID {
+				t.Errorf("unexpected RPC id %q", r.URL.Query().Get("id"))
+			}
+			_, _ = w.Write(billing)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	newConsoleClient = func(value, name, workspace string) *ConsoleClient {
+		client := NewConsoleClient(value, name, workspace)
+		client.baseURL = server.URL
+		return client
+	}
+	acct := core.AccountConfig{
+		ID: "opencode-fallback", Provider: "opencode", APIKeyEnv: "TEST_OPENCODE_MISSING_FALLBACK",
+		BrowserCookie: &core.BrowserCookieRef{Domain: ".opencode.ai", CookieName: "auth"},
+	}
+	acct.SetHint("opencode_workspace_id", "wrk_test")
+	snap, err := New().Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch error: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Errorf("status = %s, want OK after successful fallback", snap.Status)
+	}
+	if balance, ok := snap.Metrics["console_balance"]; !ok || balance.Remaining == nil || *balance.Remaining != 0 {
+		t.Errorf("console_balance = %+v, want fixture balance 0", balance)
+	}
+	if _, ok := snap.Diagnostics["opencode_page_scrape_error"]; !ok {
+		t.Error("missing page scrape diagnostic")
 	}
 }

@@ -120,7 +120,7 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 
 ### Tool / language / file usage
 
-- Source: `content[].tool_use` and the tool's input map (e.g. `file_path`, `path`, `command`).
+- Source: `content[].tool_use` and the tool's input map (e.g. `file_path`, `path`, `command`). Claude Code streams one assistant message as several JSONL lines that share a `message.id` / `requestId`, one content block per line, so a message's tool calls usually sit on its later lines. OpenUsage merges those lines into one turn: content blocks are unioned (a `tool_use` counts once per `tool_use` id), and token counts take the per-field maximum because every line repeats the message's usage, with the final output count on the last line.
 - Transform:
   - Tool counts by tool name (`Edit`, `Read`, `Bash`, etc.) → `Metrics["tool_*"]`.
   - File extensions inferred from path candidates → language histogram.
@@ -143,15 +143,14 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 
 ### Optional Usage API (organization-wide)
 
-- Source: `GET https://claude.ai/api/organizations/{org_uuid}/usage` with session cookies imported via Settings → 5 KEYS. Returns aggregate per-day usage for the entire organization.
-- Transform: when available, the response is cached in memory and applied on top of the local data. Errors fall back to the cached response (if any) so transient failures don't blank the tile.
+- Source: the account-verified Claude Code OAuth or desktop-cookie usage API described below.
+- Transform: a successful response augments local data. If the remote request fails or the account cannot be verified, quota is unavailable rather than presented from cache as fresh.
 
 ### 5h / 7d utilization gauge (`usage_five_hour`, `usage_seven_day`)
 
-- Source (macOS): the Claude **desktop app's** session cookies, decrypted from the macOS keychain, are used to call the usage API above.
-- Source (fallback, all platforms): when desktop-app cookie extraction is unavailable — anywhere but macOS, or when the desktop app isn't installed — the provider reads the Claude Code CLI's own OAuth access token from `~/.claude/.credentials.json` and calls `GET https://api.anthropic.com/api/oauth/usage`. This needs no organization UUID (the token is account-scoped) and no desktop app, so the 5h/7d gauges work on Linux and Windows. An expired token is skipped (Claude Code refreshes it on next use).
-- Source selection: the provider tries the cookie source before OAuth, pins the first source that succeeds for later polls, and clears that pin when the source fails so the next poll can probe both sources again. A cached response is used while the failed source is being recovered.
-- Transform: the response (same `five_hour` / `seven_day` utilization shape from either source) populates the gauges and warms the shared 5h cache read by the statusline and tmux segments.
+- Source: Claude Code CLI OAuth is used only when its local account identity matches the configured account. Desktop-cookie fallback verifies the authenticated account and organization before fetching quota with the same cookies. Accounts that cannot be verified are unavailable.
+- The provider makes bounded remote attempts and reports failures as unavailable rather than presenting cached values as fresh.
+- Transform: a successful response populates the gauges and records its observation time. The shared 5h cache is scoped to a verified account and expires at its original reset; rendering it cannot refresh its timestamp.
 
 ### Auth status
 
@@ -164,7 +163,8 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 
 ### How fresh is the data?
 
-- Polling: every 30 s by default. JSONL files are re-parsed only when their mtime/size changes; otherwise served from cache.
+- Polling: every 30 s by default. Each JSONL file is read incrementally: a poll decodes only the lines appended since the previous poll, and a line still being written is picked up once it is complete. A file that shrank or was replaced is read again from the start. When the new lines are newer than everything already counted (the normal case for a live session), the all-time totals are updated with just those lines instead of being recomputed across every file. The today, 7-day, and 5-hour-block figures are recomputed each poll from recent records only.
+- Change detection: the dashboard re-polls when any session file under `~/.claude/projects` changes, including appends to files in nested project folders.
 - Hook (when integration is installed): real-time per turn.
 
 ## Files read

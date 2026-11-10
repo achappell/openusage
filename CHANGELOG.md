@@ -1,33 +1,181 @@
 # Changelog
 
-## 0.27.0 (2026-09-21)
+## Unreleased
 
-<!-- Release notes generated using configuration in .github/release.yml at main -->
+- Update Go and dependencies to fix reported security vulnerabilities.
+- Keep Claude quota observations account-bound and report failed refreshes as unavailable.
+- Avoid concurrent mutation of cached telemetry usage aggregates.
 
-## What's Changed
-### Other Changes
-* Sync fork main with upstream by @achappell in https://github.com/achappell/openusage/pull/19
-* fix(active): narrate Antigravity quota resets, pacing runout, and cache daemon active queries by @achappell in https://github.com/achappell/openusage/pull/21
-* Sync upstream/main, resolve go.mod conflict by @achappell in https://github.com/achappell/openusage/pull/24
-* Update from upstream by @achappell in https://github.com/achappell/openusage/pull/22
-* fix(active): report projected quota reserve at reset by @achappell in https://github.com/achappell/openusage/pull/23
+## Fork 0.27.0 (2026-09-21)
 
+- Sync fork main with upstream: https://github.com/achappell/openusage/pull/19
+- Narrate Antigravity quota resets and pacing, and cache active queries: https://github.com/achappell/openusage/pull/21
+- Sync upstream and resolve go.mod conflict: https://github.com/achappell/openusage/pull/24
+- Update from upstream: https://github.com/achappell/openusage/pull/22
+- Report projected quota reserve at reset: https://github.com/achappell/openusage/pull/23
 
 **Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.3...v0.27.0
 
-## 0.26.3 (2026-08-29)
+## Fork 0.26.3 (2026-08-29)
+
+- Codex daily-credit forecasts and configurable SketchyBar triggers: https://github.com/achappell/openusage/pull/14
+- Decouple Codex daily-credit fetch from the all-session walk: https://github.com/achappell/openusage/pull/16
+- Codex main updates: https://github.com/achappell/openusage/pull/17
+- Restore Codex quota reporting: https://github.com/achappell/openusage/pull/18
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.2...v0.26.3
+
+## 0.26.3 (2026-11-01)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(docs): bump follow-redirects from 1.16.1 to 1.16.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/462
+* deps(docs): bump qs from 6.15.2 to 6.15.4 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/461
+* deps(docs): bump postcss-selector-parser in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/460
+* deps(docs): bump joi from 17.13.8 to 17.13.9 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/463
+### Other Changes
+* fix(pi): read usage.cost.total from Pi session logs by @devonjones in https://github.com/janekbaraniewski/openusage/pull/435
+* fix(telemetry): only recover the store when this process is the sole opener by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/449
+* refactor(opencode): hoist console RPC regexes to package-level vars by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/447
+* perf(providers): cache OpenRouter generations and Gemini CLI OAuth/loadCodeAssist by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/459
+* fix: cut idle CPU of daemon, statusline and tmux renders by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/450
+* perf: power and efficiency overhaul (#451–#467) by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/467
+* test(tmux): isolate USERPROFILE so Windows tests don't share the cache by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/468
+
+## New Contributors
+* @devonjones made their first contribution in https://github.com/janekbaraniewski/openusage/pull/435
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.26.2...v0.26.3
+
+## 0.26.2 (2026-10-26)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(deps): bump the go-minor-and-patch group with 5 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/425
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/427
+* ci(actions): bump the actions-minor-and-patch group with 6 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/429
+* deps(docs): bump posthog-js from 1.435.6 to 1.438.7 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/426
+* deps(deps): bump github.com/klauspost/compress from 1.20.1 to 1.20.3 in the go-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/430
+* deps(docs): bump the docs-minor-and-patch group in /docs/site with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/431
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/432
+* ci(actions): bump the actions-minor-and-patch group with 6 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/433
+* deps(docs): bump follow-redirects from 1.16.0 to 1.16.1 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/436
+* deps(docs): bump launch-editor from 2.14.1 to 2.14.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/437
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/438
+* deps(docs): bump posthog-js from 1.438.12 to 1.438.19 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/439
+* deps(website): bump dompurify from 3.4.16 to 3.4.17 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/441
+* deps(docs): bump undici from 7.30.0 to 7.30.1 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/442
+* deps(docs): bump dompurify from 3.4.16 to 3.4.17 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/444
+* deps(docs): bump fast-uri from 3.1.8 to 3.1.9 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/443
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/440
+* deps(docs): bump body-parser from 1.20.6 to 1.20.9 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/445
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.26.1...v0.26.2
+
+## 0.26.1 (2026-10-10)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(docs): bump compression from 1.8.1 to 1.8.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/418
+* deps(docs): bump proxy-addr from 2.0.7 to 2.0.8 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/420
+* deps(docs): bump shell-quote from 1.10.0 to 1.12.0 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/419
+* deps(docs): bump joi from 17.13.7 to 17.13.8 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/417
+* deps(docs): bump source-map-js from 1.2.1 to 1.2.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/416
+* deps(website): bump source-map-js from 1.2.1 to 1.2.2 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/415
+### Other Changes
+* fix: root-cause flaky race/timing tests by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/413
+* fix(cli): refuse to start the dashboard without a TTY by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/411
+* fix(codex): register codex in the daemon when its binary is off the service PATH by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/412
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.26.0...v0.26.1
+
+## 0.26.0 (2026-10-10)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
 
 ## What's Changed
 ### Other Changes
-* Codex daily-credit forecasts + configurable SketchyBar triggers by @achappell in https://github.com/achappell/openusage/pull/14
-* perf(codex): decouple daily credit fetch from the all-session walk by @achappell in https://github.com/achappell/openusage/pull/16
-* Codex/push main commits 2026 08 20 by @achappell in https://github.com/achappell/openusage/pull/17
-* fix: restore Codex quota reporting by @achappell in https://github.com/achappell/openusage/pull/18
+* fix(claude_code): merge streamed multi-line messages instead of keeping the first line by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/392
+* feat(opencode): add rolling/weekly/monthly quota display via console scraping by @achappell in https://github.com/janekbaraniewski/openusage/pull/250
+* Add Command Code usage provider by @yourfriendaaron in https://github.com/janekbaraniewski/openusage/pull/395
+* test(telemetry): pin zero-write replay of unchanged claude_code history (#266) by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/389
+* perf(claude_code): aggregate incrementally per session file (#266) by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/390
+* feat(muse) - Add muse-code from Meta as provider by @tomck in https://github.com/janekbaraniewski/openusage/pull/359
+* fix(daemon): stop launchd upgrade ping-pong and keep dashboard usable on upgrade failure by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/408
+* fix(tui): stacked view can scroll back up after reaching the bottom by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/410
+* fix(opencode): tile loader, ratio-as-% used, and console-session quota meters by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/409
+* fix(codex): read live quota windows from app server by @svonidze in https://github.com/janekbaraniewski/openusage/pull/366
+* Support Kimi Code CLI sessions in the kimi_cli provider by @svonidze in https://github.com/janekbaraniewski/openusage/pull/374
+* Fix Kimi CLI tile rendering for windowed activity and subscription quota by @svonidze in https://github.com/janekbaraniewski/openusage/pull/393
+* Read Kimi Code subscription quota without changing CLI credentials by @svonidze in https://github.com/janekbaraniewski/openusage/pull/394
 
 
-**Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.2...v0.26.3
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.25.1...v0.26.0
+
+## 0.25.1 (2026-10-05)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(docs): bump fast-uri from 3.1.5 to 3.1.7 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/348
+* deps(docs): bump browserslist from 4.28.6 to 4.28.8 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/350
+* deps(docs): bump fflate from 0.4.8 to 0.4.9 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/352
+* deps(website): bump fflate from 0.4.8 to 0.4.9 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/351
+* deps(deps): bump the go-minor-and-patch group with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/353
+* deps(docs): bump posthog-js from 1.422.1 to 1.426.4 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/355
+* ci(actions): bump actions/deploy-pages from 5.0.0 to 5.0.1 in the actions-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/356
+* deps(website): bump the website-minor-and-patch group in /website with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/354
+* deps(docs): bump @swc/html from 1.15.43 to 1.16.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/358
+* deps(docs): bump svgo from 3.3.4 to 3.3.5 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/361
+* deps(docs): bump js-yaml from 4.3.1 to 4.3.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/363
+* deps(docs): bump joi from 17.13.4 to 17.13.7 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/364
+* deps(docs): bump colord from 2.9.3 to 2.10.0 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/362
+* deps(deps): bump the go-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/367
+* deps(docs): bump the docs-minor-and-patch group in /docs/site with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/368
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/370
+* deps(website): bump the website-minor-and-patch group in /website with 5 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/369
+* deps(docs): bump posthog-js from 1.430.1 to 1.434.0 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/375
+* deps(website): bump the website-minor-and-patch group in /website with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/376
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/377
+* deps(docs): bump image-size from 2.0.2 to 2.0.4 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/380
+* deps(deps): bump github.com/klauspost/compress from 1.20.0 to 1.20.1 in the go-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/383
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/385
+* ci(actions): bump the actions-minor-and-patch group with 5 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/386
+* deps(docs): bump posthog-js from 1.434.0 to 1.434.13 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/384
+* deps(docs): bump undici from 7.29.0 to 7.30.0 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/387
+* deps(docs): bump dompurify from 3.4.13 to 3.4.16 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/397
+* deps(website): bump dompurify from 3.4.13 to 3.4.16 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/396
+* deps(docs): bump fast-uri from 3.1.7 to 3.1.8 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/400
+* deps(website): bump brace-expansion from 1.1.18 to 1.1.21 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/398
+* deps(docs): bump brace-expansion from 1.1.18 to 1.1.21 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/399
+* deps(website): bump the website-minor-and-patch group in /website with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/401
+* deps(docs): bump posthog-js from 1.434.13 to 1.435.6 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/402
+### Other Changes
+* fix(crush): read session timestamps as Unix seconds, not milliseconds by @LarsArtmann in https://github.com/janekbaraniewski/openusage/pull/357
+* fix(codex): fix model detection for CLI 0.153+ and cached token double-billing by @tomck in https://github.com/janekbaraniewski/openusage/pull/365
+* fix(zai): show credit-based Coding Plan quotas and accurate usage by @yourfriendaaron in https://github.com/janekbaraniewski/openusage/pull/388
+* codex: select latest session by filename time, not mtime by @tomck in https://github.com/janekbaraniewski/openusage/pull/372
+* fix(copilot): support GHE hostnames and make version check non-fatal by @tgunsch in https://github.com/janekbaraniewski/openusage/pull/373
+* fix(antigravity): stop showing a frozen quota snapshot as current by @svonidze in https://github.com/janekbaraniewski/openusage/pull/378
+* test(hermes): isolate MissingDB test from the real ~/.hermes by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/391
+
+## New Contributors
+* @LarsArtmann made their first contribution in https://github.com/janekbaraniewski/openusage/pull/357
+* @tomck made their first contribution in https://github.com/janekbaraniewski/openusage/pull/365
+* @yourfriendaaron made their first contribution in https://github.com/janekbaraniewski/openusage/pull/388
+* @tgunsch made their first contribution in https://github.com/janekbaraniewski/openusage/pull/373
+* @svonidze made their first contribution in https://github.com/janekbaraniewski/openusage/pull/378
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.25.0...v0.25.1
 
 ## 0.25.0 (2026-08-31)
 

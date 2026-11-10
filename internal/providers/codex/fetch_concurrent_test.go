@@ -104,9 +104,11 @@ func TestMergeCodexQuotaSnapshotUsesCLIFallbackWhenLiveIsUnavailable(t *testing.
 	ensureCodexSnapshotMaps(&live)
 	live.Raw["rate_limit_source"] = "live_unavailable"
 	mergeCodexQuotaSnapshot(&dst, &live, true)
-	if _, ok := dst.Metrics["rate_limit_primary"]; ok {
-		t.Fatal("live-unavailable result should clear stale session rate limits")
+	if got := *dst.Metrics["rate_limit_primary"].Used; got != 80 {
+		t.Fatalf("live response without windows should retain session quota, got %.1f", got)
 	}
+	// Fetch clears session windows once it has a usable live or CLI window.
+	clearRateLimitMetrics(&dst)
 
 	cli := core.NewUsageSnapshot("codex", "account")
 	ensureCodexSnapshotMaps(&cli)
@@ -121,5 +123,65 @@ func TestMergeCodexQuotaSnapshotUsesCLIFallbackWhenLiveIsUnavailable(t *testing.
 	}
 	if got := dst.Raw["rate_limit_source"]; got != "cli_rpc" {
 		t.Fatalf("rate_limit_source = %q, want cli_rpc", got)
+	}
+}
+
+func TestMergeCodexQuotaPoolsKeepWindowAndResetAttribution(t *testing.T) {
+	dst := core.NewUsageSnapshot("codex", "account")
+	live := core.NewUsageSnapshot("codex", "account")
+	cli := core.NewUsageSnapshot("codex", "account")
+	live.Metrics["rate_limit_primary"] = core.Metric{Used: core.Float64Ptr(40), Window: "7d"}
+	live.Raw["rate_limit_source"] = "live"
+	cli.Metrics["rate_limit_primary"] = core.Metric{Used: core.Float64Ptr(50), Window: "5h"}
+	cli.Metrics["rate_limit_secondary"] = core.Metric{Used: core.Float64Ptr(60), Window: "7d"}
+	cli.Resets["rate_limit_primary"] = time.Unix(100, 0)
+	cli.Resets["rate_limit_secondary"] = time.Unix(200, 0)
+	cli.Metrics["rate_limit_other_primary"] = core.Metric{Used: core.Float64Ptr(70), Window: "5h"}
+	cli.Resets["rate_limit_other_primary"] = time.Unix(300, 0)
+	cli.Raw["rate_limit_other_primary_bucket"] = "Other pool"
+	mergeCodexQuotaSnapshot(&dst, &live, true)
+	mergeCodexQuotaSnapshot(&dst, &cli, false)
+	if got := *dst.Metrics["rate_limit_primary"].Used; got != 40 {
+		t.Fatalf("live window replaced: %v", got)
+	}
+	if _, ok := dst.Metrics["rate_limit_secondary"]; ok {
+		t.Fatal("secondary window borrowed from a different source")
+	}
+	if _, ok := dst.Resets["rate_limit_primary"]; ok {
+		t.Fatal("reset borrowed from a different source")
+	}
+	if got := dst.Resets["rate_limit_other_primary"].Unix(); got != 300 || dst.Raw["rate_limit_other_primary_bucket"] != "Other pool" {
+		t.Fatalf("other pool attribution lost: reset=%d raw=%v", got, dst.Raw)
+	}
+}
+
+func TestMergeCodexSessionBreakdownCannotRestoreRemoteMissingWindow(t *testing.T) {
+	dst := core.NewUsageSnapshot("codex", "account")
+	workerBase := core.NewUsageSnapshot("codex", "account")
+	release := make(chan struct{})
+	done := startCodexSessionBreakdown("/sessions", workerBase, func(_ string, worker *core.UsageSnapshot) error {
+		<-release
+		worker.Metrics["rate_limit_secondary"] = core.Metric{Used: core.Float64Ptr(90), Window: "5h"}
+		worker.Resets["rate_limit_secondary"] = time.Unix(100, 0)
+		worker.Raw["rate_limit_secondary_bucket"] = "stale"
+		worker.Metrics["model_example_total_tokens"] = core.Metric{Used: core.Float64Ptr(42)}
+		return nil
+	})
+	dst.Metrics["rate_limit_primary"] = core.Metric{Used: core.Float64Ptr(20), Window: "7d"}
+	dst.Raw["rate_limit_source"] = "cli_rpc"
+	close(release)
+	result := <-done
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	mergeCodexSessionBreakdown(&dst, &result.snapshot)
+	if _, ok := dst.Metrics["rate_limit_secondary"]; ok {
+		t.Fatal("worker restored stale session quota")
+	}
+	if _, ok := dst.Resets["rate_limit_secondary"]; ok || dst.Raw["rate_limit_secondary_bucket"] != "" {
+		t.Fatal("worker restored stale quota attribution")
+	}
+	if _, ok := dst.Metrics["model_example_total_tokens"]; !ok {
+		t.Fatal("worker analytics were lost")
 	}
 }

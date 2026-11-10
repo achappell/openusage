@@ -181,3 +181,67 @@ func TestQuotaSnapshotIngestor_StoresMetricPayload(t *testing.T) {
 		t.Fatalf("extracted credit_used.reset_key = %q, want %q", gotResetKey, resetKey)
 	}
 }
+
+func TestClaudeQuotaObservationsHydrateWithActualTimeAndReset(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ingestor := NewQuotaSnapshotIngestor(store)
+	observed := time.Date(2026, 11, 9, 12, 0, 0, 100000000, time.UTC)
+	used := 30.0
+	snap := core.UsageSnapshot{
+		ProviderID: "claude_code", AccountID: "claude", Timestamp: observed.Add(-time.Minute),
+		Status: core.StatusOK, Metrics: map[string]core.Metric{"usage_five_hour": {Used: &used}},
+		Resets:     map[string]time.Time{"five_hour": observed.Add(time.Hour)},
+		Attributes: map[string]string{"usage_api_observed_at": observed.Format(time.RFC3339Nano)},
+	}
+	if err := ingestor.Ingest(context.Background(), map[string]core.UsageSnapshot{"claude": snap}); err != nil {
+		t.Fatal(err)
+	}
+	observed = observed.Add(100 * time.Millisecond)
+	reset := observed.Add(2 * time.Hour)
+	snap.Attributes["usage_api_observed_at"] = observed.Format(time.RFC3339Nano)
+	snap.Resets["five_hour"] = reset
+	if err := ingestor.Ingest(context.Background(), map[string]core.UsageSnapshot{"claude": snap}); err != nil {
+		t.Fatal(err)
+	}
+	payload, occurredAt, ok, err := queryLatestLimitSnapshotPayload(context.Background(), store.db, "claude_code", "claude")
+	if err != nil || !ok {
+		t.Fatalf("latest snapshot: found=%t err=%v", ok, err)
+	}
+	got, ok := decodeStoredLimitSnapshot("claude_code", "claude", payload, occurredAt)
+	if !ok || !got.Timestamp.Equal(observed) || !got.Resets["five_hour"].Equal(reset) {
+		t.Fatalf("hydrated snapshot = %+v, want time %s and reset %s", got, observed, reset)
+	}
+
+	// A failed fetch has no fresh marker; its own timestamp and error status
+	// must replace the previous quota rather than inheriting that marker.
+	failed := core.UsageSnapshot{
+		ProviderID: "claude_code", AccountID: "claude", Timestamp: observed.Add(time.Second),
+		Status: core.StatusError,
+	}
+	if err := ingestor.Ingest(context.Background(), map[string]core.UsageSnapshot{"claude": failed}); err != nil {
+		t.Fatal(err)
+	}
+	payload, occurredAt, ok, err = queryLatestLimitSnapshotPayload(context.Background(), store.db, "claude_code", "claude")
+	if err != nil || !ok {
+		t.Fatalf("failed snapshot: found=%t err=%v", ok, err)
+	}
+	got, ok = decodeStoredLimitSnapshot("claude_code", "claude", payload, occurredAt)
+	if !ok || got.Status != core.StatusError || !got.Timestamp.Equal(failed.Timestamp) || got.Attributes["usage_api_observed_at"] != "" || len(got.Metrics) != 0 {
+		t.Fatalf("failed snapshot hydrated as %+v", got)
+	}
+}
+
+func TestClaudeUnmarkedCachedSnapshotKeepsOriginalTimestamp(t *testing.T) {
+	original := time.Date(2026, 11, 9, 12, 0, 0, 123, time.UTC)
+	reqs := BuildLimitSnapshotRequests(map[string]core.UsageSnapshot{
+		"claude": {ProviderID: "claude_code", AccountID: "claude", Timestamp: original, Status: core.StatusError},
+	})
+	if len(reqs) != 1 || !reqs[0].OccurredAt.Equal(original) {
+		t.Fatalf("cached observation time changed: %+v", reqs)
+	}
+}

@@ -29,8 +29,8 @@ Wraps the `gh` CLI (or the standalone `copilot` binary) to surface Copilot entit
 
 Two paths trigger detection:
 
-1. **gh CLI** — `gh` on `PATH` with the Copilot extension installed
-2. **Standalone CLI** — a `copilot` binary on `PATH` plus a `~/.copilot/` directory
+1. **gh CLI**: `gh` on `PATH` with the Copilot extension installed (`<gh data dir>/extensions/gh-copilot`) or the Copilot CLI that `gh copilot` downloaded (`<gh data dir>/copilot`). The gh data dir is `$GH_DATA_DIR`, else `$XDG_DATA_HOME/gh`, else `%LOCALAPPDATA%\GitHub CLI` on Windows, else `~/.local/share/gh`. Detection only checks these paths. It never runs `gh copilot`.
+2. **Standalone CLI**: a `copilot` binary on `PATH` plus a `~/.copilot/` directory
 
 Run `gh auth status` to confirm you're signed in.
 
@@ -53,6 +53,34 @@ Run `gh auth status` to confirm you're signed in.
 ```
 
 Set `binary` to the `gh` path; `copilot_binary` is only needed if the standalone CLI lives somewhere unusual.
+
+### GitHub Enterprise Cloud/Server
+
+If your organization uses a GitHub Enterprise Cloud (`*.ghe.com`) or Server hostname instead of `github.com`, set `base_url` on the account. OpenUsage derives the `gh --hostname` flag from it automatically:
+
+```json
+{
+  "accounts": [
+    {
+      "id": "copilot",
+      "provider": "copilot",
+      "binary": "/usr/bin/gh",
+      "base_url": "https://my-company.ghe.com"
+    }
+  ]
+}
+```
+
+The host must be logged in with `gh` first. OpenUsage never runs `gh auth login` for you, so run it once per host before starting OpenUsage:
+
+```bash
+gh auth login --hostname my-company.ghe.com
+gh auth status --hostname my-company.ghe.com   # verify
+```
+
+If the host is not logged in, the tile shows an auth error ("not authenticated with GitHub").
+
+To track both `github.com` and a GHE host, add two accounts with different `id` values, one with `base_url` and one without. Each account/host pair keeps its own cached auth status and snapshot, so the two never show each other's data.
 
 ## Data sources & how each metric is computed
 
@@ -109,6 +137,16 @@ Copilot bills per seat on every plan, so per-turn dollar figures are not meaning
 ### How fresh is the data?
 
 - Polled every 30 s by default. `gh` calls are throttled by GitHub's own rate limit; the values OpenUsage reads include `remaining` and `reset` so you can see headroom.
+- To keep each poll to a few `gh` processes, results are cached per account and host:
+
+  | Data | Cached for |
+  |---|---|
+  | Full snapshot | 2 min (1 min when the status is not OK) |
+  | `gh auth status` | 5 min |
+  | Copilot version | 1 h (10 min when no version command works) |
+  | Org billing and metrics, including 403s for non-admins | 1 h |
+
+- Every `gh` subprocess runs in its own process group. On timeout the whole group is killed, so a child that `gh` started (such as the `copilot` binary behind `gh copilot`) cannot keep the poll hanging.
 
 ## API endpoints used
 
@@ -138,6 +176,7 @@ All via `gh` subprocess; no direct HTTP calls:
 
 ## Troubleshooting
 
-- **No data** — run `gh auth login` and ensure the `copilot` extension is installed (`gh extension install github/gh-copilot`).
+- **No data** — run `gh auth login` and check auth status with `gh auth status`. The optional `gh copilot` extension (`gh extension install github/gh-copilot`) is *not* required — OpenUsage only uses it to display a version string, and treats it as informational if missing.
 - **Org metrics missing** — your account isn't a Copilot Business/Enterprise admin; this is expected.
 - **Stale rate limits** — the GraphQL query is rate-limited; OpenUsage respects the polling interval to avoid hammering it.
+- **GitHub Enterprise Cloud/Server** — set `base_url` on the account (see the Setup section above) so `gh` calls target the right hostname instead of `github.com`, and make sure you ran `gh auth login --hostname <host>` for that host first.

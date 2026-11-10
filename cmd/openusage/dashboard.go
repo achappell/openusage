@@ -128,7 +128,7 @@ func runDashboard(cfg config.Config) {
 		return nil
 	})
 
-	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(30))
+	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(tuiMaxFPS))
 	dispatcher.bind(program)
 
 	go func() {
@@ -172,12 +172,20 @@ func runDashboard(cfg config.Config) {
 		},
 	)
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// Quit through Bubble Tea on termination signals so it restores the
+	// terminal (raw mode, alt screen, mouse) before the process exits. SIGHUP
+	// is included because its default action kills the process without that
+	// restore. A second signal force-kills the program, which still runs
+	// Bubble Tea's terminal restore on the way out.
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
 	go func() {
 		<-sigCh
 		cancel()
 		program.Quit()
+		<-sigCh
+		program.Kill()
 	}()
 
 	if _, err := program.Run(); err != nil {
@@ -239,5 +247,11 @@ func mapDaemonState(s daemon.DaemonState) tui.DaemonStatusMsg {
 		Status:      tuiStatus,
 		Message:     s.Message,
 		InstallHint: s.InstallHint,
+		Warning:     s.Warning,
 	}
 }
+
+// tuiMaxFPS caps how often Bubble Tea flushes frames. 15 FPS is smooth enough
+// for the spinner and scroll, and halves the renderer's idle wake-ups
+// compared to 30.
+const tuiMaxFPS = 15

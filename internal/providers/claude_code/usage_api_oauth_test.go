@@ -137,8 +137,8 @@ func TestFetchUsageAPIWithAuth_NonOKStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := fetchUsageAPIWithAuth(context.Background(), srv.URL, oauthAuthHeaders("tok")); err == nil {
-		t.Fatal("expected error on 401 response")
+	if _, err := fetchUsageAPIWithAuth(context.Background(), srv.URL, oauthAuthHeaders("tok")); err == nil || strings.Contains(err.Error(), "invalid token") {
+		t.Fatalf("expected sanitized 401 error, got %v", err)
 	}
 }
 
@@ -228,10 +228,7 @@ func TestUsageAuthSources_OAuthPrepare_UsesOAuthSchemeAndURL(t *testing.T) {
 
 	p := &Provider{}
 	sources := p.usageAuthSources("org-uuid")
-	src, ok := findUsageAuthSource(sources, "oauth")
-	if !ok {
-		t.Fatal(`findUsageAuthSource(sources, "oauth") = false`)
-	}
+	src := sources[1]
 
 	url, setAuth, err := src.prepare()
 	if err != nil {
@@ -251,85 +248,187 @@ func TestUsageAuthSources_OAuthPrepare_UsesOAuthSchemeAndURL(t *testing.T) {
 	}
 }
 
-// TestFindUsageAuthSource covers the pin-lookup helper readUsageAPI relies on
-// to resume the previously successful source.
-func TestFindUsageAuthSource(t *testing.T) {
-	p := &Provider{}
-	sources := p.usageAuthSources("org-uuid")
-
-	if _, ok := findUsageAuthSource(sources, "oauth"); !ok {
-		t.Error(`findUsageAuthSource(sources, "oauth") = false, want true`)
-	}
-	if _, ok := findUsageAuthSource(sources, "cookie"); !ok {
-		t.Error(`findUsageAuthSource(sources, "cookie") = false, want true`)
-	}
-	if _, ok := findUsageAuthSource(sources, "does-not-exist"); ok {
-		t.Error(`findUsageAuthSource(sources, "does-not-exist") = true, want false`)
-	}
-}
-
-// TestReadUsageAPI_PinsSuccessfulAuthSource covers the second-call fast path:
-// once an auth source has succeeded it's pinned, so later calls go straight
-// to it; when the pinned source stops working, the pin clears and the call
-// falls back to the last cached usage rather than erroring.
-//
-// Cookie extraction always fails on this (non-macOS) test runner, so oauth
-// is the only source that can succeed here; that's enough to exercise pin
-// set/reuse/clear without needing to fake a working cookie source too.
-func TestReadUsageAPI_PinsSuccessfulAuthSource(t *testing.T) {
-	var oauthCalls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		oauthCalls++
+func TestReadUsageAPIIsolationRotationAndBackoff(t *testing.T) {
+	calls := 0
+	status := http.StatusOK
+	var authorization string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		authorization = r.Header.Get("Authorization")
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte("secret response body"))
+			return
+		}
 		_, _ = w.Write([]byte(`{"five_hour":{"utilization":10,"resets_at":"2999-01-01T00:00:00Z"}}`))
 	}))
 	defer srv.Close()
-
 	old := oauthUsageURL
 	oauthUsageURL = srv.URL
 	defer func() { oauthUsageURL = old }()
-
-	futureMs := strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
-	writeCredentials(t, `{"claudeAiOauth":{"accessToken":"tok","expiresAt":`+futureMs+`}}`)
-
+	writeCredentials(t, `{"claudeAiOauth":{"accessToken":"first"}}`)
+	setCacheIdentity(t, "user-a", "org-a")
 	p := &Provider{}
+	snapshot := func(account, user string) core.UsageSnapshot {
+		s := core.NewUsageSnapshot("claude_code", account)
+		s.Raw["account_uuid"] = user
+		return s
+	}
+	a := snapshot("account-a", "user-a")
+	if err := p.readUsageAPI(context.Background(), "org-a", &a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, a.Attributes["usage_api_observed_at"]); err != nil {
+		t.Fatalf("missing fresh observation: %v", err)
+	}
+	if calls != 1 || authorization != "Bearer first" {
+		t.Fatalf("unexpected request: calls=%d auth=%q", calls, authorization)
+	}
+	b := snapshot("account-b", "user-b")
+	if err := p.readUsageAPI(context.Background(), "org-a", &b); err == nil || calls != 1 || len(b.Metrics) != 0 {
+		t.Fatal("mismatched identity must not use another account's credentials or quota")
+	}
+	throttled := snapshot("account-a", "user-a")
+	if err := p.readUsageAPI(context.Background(), "org-a", &throttled); err == nil || calls != 1 || len(throttled.Metrics) != 0 || throttled.Attributes["usage_api_observed_at"] != "" {
+		t.Fatal("throttled fetch must not claim a fresh cached observation")
+	}
+	key := "org-a\x00user-a"
+	p.usageAttempts[key] = time.Now().Add(-time.Minute)
+	creds := filepath.Join(os.Getenv("HOME"), ".claude", ".credentials.json")
+	if err := os.WriteFile(creds, []byte(`{"claudeAiOauth":{"accessToken":"second"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status = http.StatusTooManyRequests
+	failed := snapshot("account-a", "user-a")
+	if err := p.readUsageAPI(context.Background(), "org-a", &failed); err == nil || strings.Contains(err.Error(), "secret response body") || len(failed.Metrics) != 0 || failed.Attributes["usage_api_observed_at"] != "" {
+		t.Fatalf("failed request must not produce quota or leak its body: %v", err)
+	}
+	if calls != 2 || authorization != "Bearer second" {
+		t.Fatal("rotated credentials were not used")
+	}
+	again := snapshot("account-a", "user-a")
+	if err := p.readUsageAPI(context.Background(), "org-a", &again); err == nil || calls != 2 {
+		t.Fatal("failure must back off")
+	}
+}
 
-	snap := core.NewUsageSnapshot("claude_code", "acct")
-	if err := p.readUsageAPI(context.Background(), "org-uuid", &snap); err != nil {
-		t.Fatalf("first call: unexpected error: %v", err)
-	}
-	if got := p.getLastUsageAuthSource(); got != "oauth" {
-		t.Fatalf("pinned source after first success = %q, want %q", got, "oauth")
-	}
-	if oauthCalls != 1 {
-		t.Fatalf("oauth server calls after first call = %d, want 1", oauthCalls)
-	}
-
-	snap2 := core.NewUsageSnapshot("claude_code", "acct")
-	if err := p.readUsageAPI(context.Background(), "org-uuid", &snap2); err != nil {
-		t.Fatalf("second call: unexpected error: %v", err)
-	}
-	if got := p.getLastUsageAuthSource(); got != "oauth" {
-		t.Fatalf("pinned source after second success = %q, want %q", got, "oauth")
-	}
-	if oauthCalls != 2 {
-		t.Fatalf("oauth server calls after second call = %d, want 2", oauthCalls)
-	}
-
-	// Break the pinned source: point the home dir somewhere with no
-	// credentials file, so readClaudeCodeOAuthToken fails before any HTTP call.
+func TestCookieQuotaRequiresVerifiedAccountAndOrganization(t *testing.T) {
 	setTempHome(t)
+	setCacheIdentity(t, "user-a", "org-a")
+	body := `{"uuid":"user-a","email_address":"a@example.com","memberships":[{"organization":{"uuid":"org-a"}}]}`
+	status := http.StatusOK
+	usageCalls := 0
+	var cookieSeen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookieSeen = r.Header.Get("Cookie")
+		if r.URL.Path == "/account" {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		usageCalls++
+		_, _ = w.Write([]byte(`{"five_hour":{"utilization":31,"resets_at":"2999-01-01T00:00:00Z"}}`))
+	}))
+	defer srv.Close()
+	oldURL := cookieAccountURL
+	cookieAccountURL = srv.URL + "/account"
+	defer func() { cookieAccountURL = oldURL }()
+	p := &Provider{}
+	fetch := func(cookie string) (core.UsageSnapshot, error) {
+		s := core.NewUsageSnapshot("claude_code", "account-a")
+		s.Raw["account_uuid"] = "user-a"
+		err := p.tryUsageAuthSource(context.Background(), "cookie", srv.URL+"/usage", cookieAuthHeaders(map[string]string{"sessionKey": cookie}), "org-a", "a@example.com", &s)
+		return s, err
+	}
+	s, err := fetch("first")
+	if err != nil || usageCalls != 1 || s.Attributes["usage_api_observed_at"] == "" || !strings.Contains(cookieSeen, "first") {
+		t.Fatalf("verified cookie fetch failed: %v", err)
+	}
+	cases := []struct {
+		body   string
+		status int
+	}{
+		{`{"uuid":"user-b","memberships":[{"organization":{"uuid":"org-a"}}]}`, http.StatusOK},
+		{`{"uuid":"user-a","memberships":[{"organization":{"uuid":"org-b"}}]}`, http.StatusOK},
+		{`{"memberships":[{"organization":{"uuid":"org-a"}}]}`, http.StatusOK},
+		{`secret body`, http.StatusTooManyRequests},
+	}
+	for _, tc := range cases {
+		body, status = tc.body, tc.status
+		s, err = fetch("rotated")
+		if err == nil || strings.Contains(err.Error(), "secret body") || usageCalls != 1 || len(s.Metrics) != 0 || s.Attributes["usage_api_observed_at"] != "" {
+			t.Fatalf("unverified cookie produced quota or leaked data: %v", err)
+		}
+	}
+	body, status = `{"email_address":"A@example.com","memberships":[{"organization":{"uuid":"org-a"}}]}`, http.StatusOK
+	s, err = fetch("rotated")
+	if err != nil || usageCalls != 2 || !strings.Contains(cookieSeen, "rotated") || s.Attributes["usage_api_observed_at"] == "" {
+		t.Fatalf("verified rotated cookie fetch failed: %v", err)
+	}
+}
 
-	snap3 := core.NewUsageSnapshot("claude_code", "acct")
-	if err := p.readUsageAPI(context.Background(), "org-uuid", &snap3); err != nil {
-		t.Fatalf("third call: expected cache fallback, got error: %v", err)
+func TestReadUsageAPIRetryAfterAndAccountIsolation(t *testing.T) {
+	calls := 0
+	status := http.StatusTooManyRequests
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if status != http.StatusOK {
+			if status == http.StatusTooManyRequests {
+				w.Header().Set("Retry-After", "600")
+			}
+			w.WriteHeader(status)
+			return
+		}
+		_, _ = w.Write([]byte(`{"five_hour":{"utilization":10,"resets_at":"2999-01-01T00:00:00Z"}}`))
+	}))
+	defer srv.Close()
+	old := oauthUsageURL
+	oauthUsageURL = srv.URL
+	defer func() { oauthUsageURL = old }()
+	writeCredentials(t, `{"claudeAiOauth":{"accessToken":"tok"}}`)
+	setCacheIdentity(t, "user-a", "org-a")
+	p := &Provider{}
+	snapshot := func(account, user string) core.UsageSnapshot {
+		s := core.NewUsageSnapshot("claude_code", account)
+		s.Raw["account_uuid"] = user
+		return s
 	}
-	if snap3.Raw["usage_api_cached"] != "true" {
-		t.Fatalf("third call: expected cached fallback, got Raw=%v", snap3.Raw)
+	a := snapshot("account-a", "user-a")
+	if err := p.readUsageAPI(context.Background(), "org-a", &a); err == nil || calls != 1 || len(a.Metrics) != 0 {
+		t.Fatalf("429 must fail without quota: %v", err)
 	}
-	if got := p.getLastUsageAuthSource(); got != "" {
-		t.Fatalf("pin should clear once the pinned source fails, got %q", got)
+	key := "org-a\x00user-a"
+	wait := time.Until(p.usageRetryAt[key])
+	if wait < 9*time.Minute || wait > 10*time.Minute {
+		t.Fatalf("backoff = %s, want about 10m", wait)
 	}
-	if oauthCalls != 2 {
-		t.Fatalf("oauth server calls after credential removal = %d, want still 2 (prepare should fail before any request)", oauthCalls)
+	p.usageAttempts[key] = time.Now().Add(-time.Hour)
+	a = snapshot("account-a", "user-a")
+	if err := p.readUsageAPI(context.Background(), "org-a", &a); err == nil || calls != 1 || a.Attributes["usage_api_observed_at"] != "" {
+		t.Fatal("retry-after must prevent requests without presenting cached success")
+	}
+	setCacheIdentity(t, "user-b", "org-b")
+	status = http.StatusOK
+	b := snapshot("account-b", "user-b")
+	if err := p.readUsageAPI(context.Background(), "org-b", &b); err != nil || calls != 2 || b.Attributes["usage_api_observed_at"] == "" {
+		t.Fatalf("another identity must not inherit backoff: %v", err)
+	}
+	setCacheIdentity(t, "user-a", "org-a")
+	p.usageRetryAt[key] = time.Now().Add(-time.Second)
+	status = http.StatusServiceUnavailable
+	a = snapshot("account-a", "user-a")
+	if err := p.readUsageAPI(context.Background(), "org-a", &a); err == nil || calls != 3 || p.usageThrottleFailures[key] != 2 {
+		t.Fatalf("second throttle must increase backoff: %v", err)
+	}
+	wait = time.Until(p.usageRetryAt[key])
+	if wait < 110*time.Second || wait > 2*time.Minute {
+		t.Fatalf("second backoff = %s, want about 2m", wait)
+	}
+	p.usageRetryAt[key] = time.Now().Add(-time.Second)
+	p.usageAttempts[key] = time.Now().Add(-time.Hour)
+	status = http.StatusOK
+	a = snapshot("account-a", "user-a")
+	if err := p.readUsageAPI(context.Background(), "org-a", &a); err != nil || calls != 4 || p.usageThrottleFailures[key] != 0 {
+		t.Fatalf("success must reset backoff: %v", err)
 	}
 }

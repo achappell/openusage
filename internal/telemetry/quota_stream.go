@@ -23,9 +23,23 @@ func (i *QuotaSnapshotIngestor) Ingest(ctx context.Context, snaps map[string]cor
 		return nil
 	}
 	reqs := BuildLimitSnapshotRequests(snaps)
+	pending := make([]IngestRequest, 0, len(reqs))
 	for _, req := range reqs {
-		if _, err := i.store.Ingest(ctx, req); err != nil {
-			return fmt.Errorf("ingest limit snapshot (%s/%s): %w", req.ProviderID, req.AccountID, err)
+		// An unchanged snapshot only needs its timestamp moved forward;
+		// rewriting the full payload (100+ KB for local agents) every poll
+		// is pure write amplification.
+		touched, err := i.store.touchIdenticalLimitSnapshot(ctx, req)
+		if err != nil {
+			return fmt.Errorf("compare limit snapshot (%s/%s): %w", req.ProviderID, req.AccountID, err)
+		}
+		if !touched {
+			pending = append(pending, req)
+		}
+	}
+	for idx, outcome := range i.store.IngestBatch(ctx, pending) {
+		if outcome.Err != nil {
+			req := pending[idx]
+			return fmt.Errorf("ingest limit snapshot (%s/%s): %w", req.ProviderID, req.AccountID, outcome.Err)
 		}
 	}
 	return nil
@@ -50,14 +64,19 @@ func BuildLimitSnapshotRequests(snaps map[string]core.UsageSnapshot) []IngestReq
 		if occurredAt.IsZero() {
 			occurredAt = time.Now().UTC()
 		}
+		if providerID == "claude_code" {
+			if observedAt, err := time.Parse(time.RFC3339Nano, snap.Attributes["usage_api_observed_at"]); err == nil {
+				occurredAt = observedAt.UTC()
+			}
+		}
 
-		// Stable per provider/account/timestamp-second snapshot ID.
-		turnID := fmt.Sprintf(
-			"snapshot:%s:%s:%s",
-			providerID,
-			effectiveAccountID,
-			occurredAt.Truncate(time.Second).Format(time.RFC3339),
-		)
+		// Keep existing IDs for other providers. Claude may produce multiple
+		// distinct observations within a second, including a failure after success.
+		turnTime := occurredAt.Truncate(time.Second).Format(time.RFC3339)
+		if providerID == "claude_code" {
+			turnTime = occurredAt.Format(time.RFC3339Nano)
+		}
+		turnID := fmt.Sprintf("snapshot:%s:%s:%s", providerID, effectiveAccountID, turnTime)
 
 		out = append(out, IngestRequest{
 			SourceSystem:        SourceSystemPoller,

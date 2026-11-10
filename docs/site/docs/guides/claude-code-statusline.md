@@ -46,7 +46,13 @@ Then **restart Claude Code** (or open a new session) so it re-reads `settings.js
 | Context % | `🧠 96k (48%)` | Tokens in the context window vs. the model's limit; turns yellow then red as it fills. |
 
 :::tip
-The **5h usage window** segment needs the [telemetry daemon](../daemon/overview.md) (`openusage telemetry daemon install`), which is what polls Claude Code's rate-limit quota. The value is cached locally for ~30s (a single small file shared across sessions), so renders stay instant and the daemon isn't hit on every keystroke. The other segments work purely from local logs with no daemon.
+The **5h usage window** segment needs the [telemetry daemon](../daemon/overview.md), which polls Claude Code's rate-limit quota. The statusline reads a single unambiguous, fresh daemon observation; it omits the segment if the daemon is unavailable, the observation has expired, or multiple Claude accounts are configured. The other segments work purely from local logs with no daemon.
+:::
+
+:::note
+Claude Code re-runs the statusline on every message, so each render reads only the conversation logs modified since local midnight or in the last 10 hours, whichever reaches further back, plus every log of the current session. Older history can't change today's cost, the active block, or the context window, so skipping it keeps each render well under a second, even with gigabytes of history. The session figure still covers the whole conversation.
+
+On top of that, the last rendered line is cached per session in `~/.cache/openusage/statusline-render-*`. If the session input, the transcript file (its modification time and size) and the statusline flags are unchanged and the cached line is less than 10 seconds old, it is printed as is, without reading logs or contacting the daemon. A new message changes the transcript, so it always triggers a fresh render. Cache files for sessions idle for a day are removed automatically.
 :::
 
 ## Customize

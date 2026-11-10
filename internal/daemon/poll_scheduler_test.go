@@ -27,6 +27,22 @@ func TestPollScheduler_ShouldPoll_RespectsBaseInterval(t *testing.T) {
 	}
 }
 
+func TestPollScheduler_RemoteMinimumBoundsShortBaseInterval(t *testing.T) {
+	ps := newPollScheduler(time.Second)
+	if !ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("first poll should run")
+	}
+	ps.RecordPoll("claude", true)
+	ps.states["claude"].lastPollAt = time.Now().Add(-10 * time.Second)
+	if ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("remote minimum should prevent a premature fetch")
+	}
+	ps.states["claude"].lastPollAt = time.Now().Add(-31 * time.Second)
+	if !ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("remote poll should run after its minimum interval")
+	}
+}
+
 func TestPollScheduler_BackoffTiers(t *testing.T) {
 	ps := newPollScheduler(30 * time.Second)
 
@@ -157,3 +173,132 @@ func TestPollScheduler_UnknownAccount(t *testing.T) {
 }
 
 func ptr(f float64) *float64 { return &f }
+
+func newTestScheduler(base time.Duration) (*PollScheduler, *time.Time) {
+	ps := newPollScheduler(base)
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	ps.now = func() time.Time { return now }
+	return ps, &now
+}
+
+func TestPollScheduler_RespectsRetryAfter(t *testing.T) {
+	ps, now := newTestScheduler(30 * time.Second)
+	ps.ShouldPoll("acct1", false)
+	ps.RecordPoll("acct1", true)
+
+	// A 200 response that still carries Retry-After (e.g. a soft limit) must
+	// hold off polling until the requested time even though Status is OK.
+	snap := core.UsageSnapshot{Status: core.StatusOK, NextPollNotBefore: now.Add(10 * time.Minute)}
+	ps.RecordOutcome("acct1", snap)
+
+	*now = now.Add(9 * time.Minute)
+	if ps.ShouldPoll("acct1", false) {
+		t.Fatal("polled before Retry-After elapsed")
+	}
+	*now = now.Add(61 * time.Second)
+	if !ps.ShouldPoll("acct1", false) {
+		t.Fatal("did not poll after Retry-After elapsed")
+	}
+}
+
+func TestPollScheduler_RemoteMinimumAndRetryAfter(t *testing.T) {
+	ps, now := newTestScheduler(time.Second)
+	ps.shouldPoll("claude", false, 30*time.Second)
+	ps.RecordPoll("claude", true)
+	ps.RecordOutcome("claude", core.UsageSnapshot{Status: core.StatusError, NextPollNotBefore: now.Add(time.Minute)})
+
+	*now = now.Add(29 * time.Second)
+	if ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("polled before minimum and retry-after")
+	}
+	*now = now.Add(time.Second)
+	if ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("minimum bypassed retry-after")
+	}
+	*now = now.Add(30 * time.Second)
+	if !ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("did not poll after both delays elapsed")
+	}
+}
+
+func TestPollScheduler_RetryAfterCapped(t *testing.T) {
+	ps, now := newTestScheduler(30 * time.Second)
+	ps.ShouldPoll("acct1", false)
+	ps.RecordPoll("acct1", true)
+	ps.RecordOutcome("acct1", core.UsageSnapshot{Status: core.StatusLimited, NextPollNotBefore: now.Add(48 * time.Hour)})
+
+	*now = now.Add(maxNotBeforeHorizon + time.Second)
+	if !ps.ShouldPoll("acct1", false) {
+		t.Fatal("Retry-After beyond the horizon was not capped")
+	}
+}
+
+func TestPollScheduler_ExponentialBackoffOnLimitedAndError(t *testing.T) {
+	ps, now := newTestScheduler(30 * time.Second)
+	ps.ShouldPoll("acct1", false)
+
+	want := []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 16 * time.Minute, 30 * time.Minute, 30 * time.Minute}
+	for i, wait := range want {
+		status := core.StatusLimited
+		if i%2 == 1 {
+			status = core.StatusError
+		}
+		ps.RecordPoll("acct1", false)
+		ps.RecordOutcome("acct1", core.UsageSnapshot{Status: status, Message: "rate limited (HTTP 429)"})
+
+		*now = now.Add(wait - time.Second)
+		if ps.ShouldPoll("acct1", false) {
+			t.Fatalf("failure %d: polled before %s backoff", i+1, wait)
+		}
+		*now = now.Add(time.Second)
+		if !ps.ShouldPoll("acct1", false) {
+			t.Fatalf("failure %d: not polled after %s backoff", i+1, wait)
+		}
+	}
+
+	// Recovery clears the streak: next poll at the base interval.
+	ps.RecordPoll("acct1", true)
+	ps.RecordOutcome("acct1", core.UsageSnapshot{Status: core.StatusOK})
+	*now = now.Add(30 * time.Second)
+	if !ps.ShouldPoll("acct1", false) {
+		t.Fatal("did not return to base interval after recovery")
+	}
+}
+
+func TestPollScheduler_QuotaExhaustedDoesNotBackOff(t *testing.T) {
+	ps, now := newTestScheduler(30 * time.Second)
+	ps.ShouldPoll("acct1", false)
+
+	// A provider at 100% of its quota reports StatusLimited without any
+	// throttling signal. Polling must continue at the base interval so the
+	// quota reset shows up promptly.
+	for i := 0; i < 4; i++ {
+		ps.RecordPoll("acct1", true)
+		ps.RecordOutcome("acct1", core.UsageSnapshot{Status: core.StatusLimited, Message: "5h limit reached"})
+		*now = now.Add(30 * time.Second)
+		if !ps.ShouldPoll("acct1", false) {
+			t.Fatalf("poll %d: quota-exhausted snapshot triggered failure backoff", i+1)
+		}
+	}
+}
+
+func TestIsFailedFetch(t *testing.T) {
+	cases := []struct {
+		name string
+		snap core.UsageSnapshot
+		want bool
+	}{
+		{"error", core.UsageSnapshot{Status: core.StatusError}, true},
+		{"429 message", core.UsageSnapshot{Status: core.StatusLimited, Message: "Rate limited (HTTP 429)"}, true},
+		{"retry-after raw", core.UsageSnapshot{Status: core.StatusLimited, Raw: map[string]string{"retry_after": "30"}}, true},
+		{"retry-after parsed", core.UsageSnapshot{Status: core.StatusLimited, NextPollNotBefore: time.Now().Add(time.Minute)}, true},
+		{"quota exhausted", core.UsageSnapshot{Status: core.StatusLimited}, false},
+		{"near limit", core.UsageSnapshot{Status: core.StatusNearLimit}, false},
+		{"ok", core.UsageSnapshot{Status: core.StatusOK}, false},
+	}
+	for _, tc := range cases {
+		if got := isFailedFetch(tc.snap); got != tc.want {
+			t.Errorf("%s: isFailedFetch = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

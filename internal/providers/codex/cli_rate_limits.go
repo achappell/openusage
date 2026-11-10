@@ -6,16 +6,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 type codexCLIRateLimitsSnapshot struct {
+	LimitID           string                   `json:"limitId,omitempty"`
+	LimitName         string                   `json:"limitName,omitempty"`
 	Credits           *usageCredits            `json:"credits,omitempty"`
 	IndividualLimit   *creditLimitDetails      `json:"individual_limit,omitempty"`
 	IndividualLimitV2 *creditLimitDetails      `json:"individualLimit,omitempty"`
@@ -27,9 +32,7 @@ type codexCLIRateLimitsSnapshot struct {
 	PlanTypeV2        string                   `json:"planType,omitempty"`
 }
 
-// codexCLIRateLimitWindow is the current app-server shape. Codex has used
-// both camelCase and snake_case fields across app-server versions, so the
-// parser accepts both forms and flexible numeric values.
+// Accept both historical snake_case and current camelCase numeric fields.
 type codexCLIRateLimitWindow struct {
 	UsedPercent         any `json:"usedPercent,omitempty"`
 	UsedPercentLegacy   any `json:"used_percent,omitempty"`
@@ -44,11 +47,6 @@ type codexCLIRateLimitsResult struct {
 	RateLimitsV2          *codexCLIRateLimitsSnapshot           `json:"rateLimits,omitempty"`
 	RateLimitsByLimitID   map[string]codexCLIRateLimitsSnapshot `json:"rate_limits_by_limit_id,omitempty"`
 	RateLimitsByLimitIDV2 map[string]codexCLIRateLimitsSnapshot `json:"rateLimitsByLimitId,omitempty"`
-}
-
-type codexCLIRateLimitsCandidate struct {
-	limitID  string
-	snapshot codexCLIRateLimitsSnapshot
 }
 
 type codexRPCMessage struct {
@@ -80,49 +78,79 @@ func applyCodexCLIRateLimits(result codexCLIRateLimitsResult, snap *core.UsageSn
 		return false
 	}
 
-	candidates := make([]codexCLIRateLimitsCandidate, 0, 1+len(result.RateLimitsByLimitID)+len(result.RateLimitsByLimitIDV2))
-	if result.RateLimitsV2 != nil {
-		candidates = append(candidates, codexCLIRateLimitsCandidate{limitID: "codex", snapshot: *result.RateLimitsV2})
+	snap.EnsureMaps()
+	clearRateLimitMetrics(snap)
+	candidates := result.RateLimitsByLimitIDV2
+	if len(candidates) == 0 {
+		candidates = result.RateLimitsByLimitID
 	}
-	if result.RateLimits != nil {
-		candidates = append(candidates, codexCLIRateLimitsCandidate{limitID: "codex", snapshot: *result.RateLimits})
-	}
-	for limitID, candidate := range result.RateLimitsByLimitIDV2 {
-		candidates = append(candidates, codexCLIRateLimitsCandidate{limitID: limitID, snapshot: candidate})
-	}
-	for limitID, candidate := range result.RateLimitsByLimitID {
-		candidates = append(candidates, codexCLIRateLimitsCandidate{limitID: limitID, snapshot: candidate})
+	if len(candidates) == 0 {
+		legacy := result.RateLimitsV2
+		if legacy == nil {
+			legacy = result.RateLimits
+		}
+		if legacy != nil {
+			candidates = map[string]codexCLIRateLimitsSnapshot{core.FirstNonEmpty(legacy.LimitID, "codex"): *legacy}
+		}
 	}
 
 	applied := false
-	creditLimitApplied := false
 	rateLimitMetricsApplied := false
-	for _, candidate := range candidates {
-		snapshot := candidate.snapshot
-		planType := core.FirstNonEmpty(snapshot.PlanTypeV2, snapshot.PlanType)
-		if planType != "" {
-			snap.Raw["plan_type"] = planType
-			applied = true
+	for _, id := range core.SortedStringKeys(candidates) {
+		snapshot := candidates[id]
+		if snapshot.LimitID != "" && snapshot.LimitID != id {
+			continue
 		}
-		primaryKey, secondaryKey := "rate_limit_primary", "rate_limit_secondary"
-		if limitID := sanitizeMetricName(candidate.limitID); limitID != "" && limitID != "codex" {
-			primaryKey = "rate_limit_" + limitID + "_primary"
-			secondaryKey = "rate_limit_" + limitID + "_secondary"
+		prefix := "rate_limit_" + sanitizeMetricName(id) + "_"
+		if id == "codex" {
+			prefix = "rate_limit_"
 		}
+		primaryKey, secondaryKey := prefix+"primary", prefix+"secondary"
+		name := core.FirstNonEmpty(snapshot.LimitName, id)
+		snap.Raw[primaryKey+"_bucket"] = name
+		snap.Raw[secondaryKey+"_bucket"] = name
 		if applyCodexCLIRateLimitWindows(snapshot, snap, primaryKey, secondaryKey) > 0 {
 			rateLimitMetricsApplied = true
 			applied = true
 		}
-		if snapshot.Credits != nil {
-			applyUsageCredits(snapshot.Credits, snap)
+	}
+	// The per-ID map controls windows, but older servers may report account
+	// credit metadata only in the legacy main-pool object.
+	main, haveMain := candidates["codex"]
+	if haveMain && main.LimitID != "" && main.LimitID != "codex" {
+		haveMain = false
+	}
+	legacy := result.RateLimitsV2
+	if legacy == nil {
+		legacy = result.RateLimits
+	}
+	if legacy != nil && (legacy.LimitID == "" || legacy.LimitID == "codex") {
+		if !haveMain {
+			main = *legacy
+			haveMain = true
+		} else {
+			if main.PlanTypeV2 == "" && main.PlanType == "" {
+				main.PlanTypeV2, main.PlanType = legacy.PlanTypeV2, legacy.PlanType
+			}
+			if main.Credits == nil {
+				main.Credits = legacy.Credits
+			}
+			if main.IndividualLimitV2 == nil && main.IndividualLimit == nil {
+				main.IndividualLimitV2, main.IndividualLimit = legacy.IndividualLimitV2, legacy.IndividualLimit
+			}
+		}
+	}
+	if haveMain {
+		if planType := core.FirstNonEmpty(main.PlanTypeV2, main.PlanType); planType != "" {
+			snap.Raw["plan_type"] = planType
 			applied = true
 		}
-		if !creditLimitApplied {
-			details := firstCreditLimit(snapshot.IndividualLimitV2, snapshot.IndividualLimit)
-			if applyCreditLimitDetails(details, snap, "cli") {
-				creditLimitApplied = true
-				applied = true
-			}
+		if main.Credits != nil {
+			applyUsageCredits(main.Credits, snap)
+			applied = true
+		}
+		if applyCreditLimitDetails(firstCreditLimit(main.IndividualLimitV2, main.IndividualLimit), snap, "cli") {
+			applied = true
 		}
 	}
 	if applied {
@@ -173,11 +201,16 @@ func applyCodexCLIRateLimitWindow(
 	if !ok {
 		return false
 	}
-	used = clampPercent(used)
+	if math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > 100 {
+		return false
+	}
 	remaining := 100 - used
 	minutes, _ := parseFlexibleNumber(window.WindowDurationMins)
 	if minutes <= 0 {
 		minutes, _ = parseFlexibleNumber(window.WindowMinutesLegacy)
+	}
+	if math.IsNaN(minutes) || math.IsInf(minutes, 0) || minutes <= 0 {
+		return false
 	}
 	snap.EnsureMaps()
 	limit := float64(100)
@@ -208,13 +241,16 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 		binary = "codex"
 	}
 
-	rpcCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	rpcCtx, cancel := context.WithTimeout(ctx, codexRPCTimeout(ctx, time.Now()))
 	defer cancel()
-	cmd := exec.CommandContext(rpcCtx, binary, "app-server")
+	cmd := exec.CommandContext(rpcCtx, binary, "app-server", "--stdio")
 	cmd.Stderr = io.Discard
-	if configDir != "" {
-		cmd.Env = append(os.Environ(), "CODEX_HOME="+configDir)
-	}
+	cmd.Env = codexAppServerEnv(os.Environ(), binary, configDir)
+	// codex is often a wrapper (npm's codex.js) whose child would outlive a
+	// plain kill and hold the pipes open; kill the whole group, and never let
+	// Wait block on a leaked pipe holder (#446).
+	shared.StartInOwnProcessGroup(cmd)
+	cmd.WaitDelay = time.Second
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -227,26 +263,65 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 	if err := cmd.Start(); err != nil {
 		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: starting app-server: %w", err)
 	}
-	defer func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+	// waitProcess reaps the child at most once; rpcCtx bounds it because
+	// exec.CommandContext kills the process when the context is done.
+	waited := false
+	var waitErr error
+	waitProcess := func() error {
+		if !waited {
+			waited = true
+			waitErr = cmd.Wait()
 		}
-		_ = cmd.Wait()
+		return waitErr
+	}
+	defer func() {
+		if !waited && cmd.Process != nil {
+			// app-server exits on stdin EOF; then kill the group so a
+			// wrapper's child cannot survive as an orphan.
+			_ = stdin.Close()
+			_ = shared.KillProcessGroup(cmd)
+		}
+		_ = waitProcess()
 	}()
+
+	// writeRequest reports the process exit status when the child dies before
+	// it reads the request: the write then fails with EPIPE, which would
+	// otherwise mask the more useful exit error.
+	writeRequest := func(request string) error {
+		writeErr := writeCodexRPCRequest(stdin, request)
+		if writeErr == nil {
+			return nil
+		}
+		_ = stdin.Close()
+		exitErr := waitProcess()
+		if rpcCtx.Err() != nil {
+			return fmt.Errorf("codex: app-server request timed out: %w", rpcCtx.Err())
+		}
+		if exitErr != nil {
+			return fmt.Errorf("codex: app-server exited before request: %w", exitErr)
+		}
+		return writeErr
+	}
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 4*1024), 512*1024)
 
-	if err := writeCodexRPCRequest(stdin, `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"openusage","version":"dev"}}}`); err != nil {
+	if err := writeRequest(`{"id":1,"method":"initialize","params":{"clientInfo":{"name":"openusage","version":"dev"}}}`); err != nil {
 		return codexCLIRateLimitsResult{}, err
 	}
 	if _, err := readCodexRPCResponse(scanner, 1); err != nil {
+		if rpcCtx.Err() != nil {
+			return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server initialize timed out: %w", rpcCtx.Err())
+		}
+		if err == io.EOF {
+			return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server exited before initialize: %w", waitProcess())
+		}
 		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server initialize failed: %w", err)
 	}
-	if err := writeCodexRPCRequest(stdin, `{"method":"initialized","params":{}}`); err != nil {
+	if err := writeRequest(`{"method":"initialized","params":{}}`); err != nil {
 		return codexCLIRateLimitsResult{}, err
 	}
-	if err := writeCodexRPCRequest(stdin, `{"id":2,"method":"account/rateLimits/read","params":{}}`); err != nil {
+	if err := writeRequest(`{"id":2,"method":"account/rateLimits/read","params":{}}`); err != nil {
 		return codexCLIRateLimitsResult{}, err
 	}
 	message, err := readCodexRPCResponse(scanner, 2)
@@ -256,14 +331,68 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 		}
 		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: reading app-server rate limits: %w", err)
 	}
-	if len(message.Error) > 0 && string(message.Error) != "null" {
-		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server rate limits error: %s", string(message.Error))
-	}
 	var result codexCLIRateLimitsResult
 	if err := json.Unmarshal(message.Result, &result); err != nil {
 		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: parsing app-server rate limits: %w", err)
 	}
 	return result, nil
+}
+
+// codexRPCMaxTimeout bounds the app-server round trip when the caller has no
+// tighter deadline.
+const codexRPCMaxTimeout = 8 * time.Second
+
+// codexRPCTimeout returns how long the app-server RPC may run. The daemon
+// polls each provider with an 8s deadline; letting the RPC use all of it
+// left no time for the HTTP quota fallback, so the RPC gets at most half of
+// the remaining budget.
+func codexRPCTimeout(ctx context.Context, now time.Time) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return codexRPCMaxTimeout
+	}
+	half := deadline.Sub(now) / 2
+	if half <= 0 {
+		return time.Millisecond
+	}
+	return min(half, codexRPCMaxTimeout)
+}
+
+// codexAppServerEnv builds the app-server environment. When codex is resolved
+// to an absolute path, its directory is put first on PATH: npm/nvm installs
+// ship codex as a `#!/usr/bin/env node` script next to the node binary, and
+// the daemon's launchd/systemd PATH usually does not include that directory.
+func codexAppServerEnv(base []string, binary, configDir string) []string {
+	env := make([]string, 0, len(base)+1)
+	binDir := ""
+	if filepath.IsAbs(binary) {
+		binDir = filepath.Dir(binary)
+	}
+	pathSet := false
+	for _, kv := range base {
+		if binDir != "" && strings.HasPrefix(kv, "PATH=") {
+			current := strings.TrimPrefix(kv, "PATH=")
+			if !slices.Contains(filepath.SplitList(current), binDir) {
+				if current == "" {
+					kv = "PATH=" + binDir
+				} else {
+					kv = "PATH=" + binDir + string(os.PathListSeparator) + current
+				}
+			}
+			pathSet = true
+		}
+		if configDir != "" && strings.HasPrefix(kv, "CODEX_HOME=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	if binDir != "" && !pathSet {
+		env = append(env, "PATH="+binDir)
+	}
+	if configDir != "" {
+		env = append(env, "CODEX_HOME="+configDir)
+	}
+	return env
 }
 
 func writeCodexRPCRequest(stdin io.Writer, request string) error {
@@ -280,11 +409,18 @@ func readCodexRPCResponse(scanner *bufio.Scanner, id int) (codexRPCMessage, erro
 			continue
 		}
 		if strings.TrimSpace(string(message.ID)) == fmt.Sprintf("%d", id) {
+			if len(message.Error) > 0 && string(message.Error) != "null" {
+				var rpcError struct {
+					Code int `json:"code"`
+				}
+				_ = json.Unmarshal(message.Error, &rpcError)
+				return codexRPCMessage{}, fmt.Errorf("app-server request %d failed (RPC code %d)", id, rpcError.Code)
+			}
 			return message, nil
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return codexRPCMessage{}, fmt.Errorf("reading app-server response: %w", err)
 	}
-	return codexRPCMessage{}, fmt.Errorf("app-server returned no response for request %d", id)
+	return codexRPCMessage{}, io.EOF
 }

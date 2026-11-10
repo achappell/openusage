@@ -205,41 +205,39 @@ func BuildContext(ctx context.Context, opts BuildOptions) (Context, error) {
 	return c, nil
 }
 
-// fiveHourCacheMaxAge bounds how stale the disk-cached 5h usage % may be before
-// the bar stops trusting it. The 5h window moves slowly and the daemon refreshes
-// the cache every poll, so a generous bound keeps the segment populated through
-// transient daemon/usage-API slowness while still expiring after a long idle.
-const fiveHourCacheMaxAge = 15 * time.Minute
-
-// reconcileFiveHourUsage keeps the bar's 5h segment (block_pct) populated even
-// when the live snapshot lacks usage_five_hour. The metric originates from the
-// slow claude.ai usage API, which the budget-limited render frequently can't
-// reach (a slow daemon read-model forces a direct fallback that times out on
-// the fetch). So:
-//   - when the snapshot HAS the metric, persist it so future budget-limited
-//     renders have a warm fallback;
-//   - when it's MISSING, inject a recent cached value so block_pct resolves
-//     instead of the segment silently dropping.
+// Cached quota may only be reused for the same account and observation; a
+// failed or missing observation is not made fresh by rendering it again.
 func reconcileFiveHourUsage(c *Context) {
-	if m, ok := c.Snapshot.Metrics["usage_five_hour"]; ok && m.Used != nil {
-		claude_code.WriteFiveHourCache(*m.Used)
+	now := c.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	snap := &c.Snapshot
+	observed, err := time.Parse(time.RFC3339Nano, snap.Attributes["usage_api_observed_at"])
+	if snap.AccountID == "" || (snap.Status != core.StatusOK && snap.Status != core.StatusNearLimit && snap.Status != core.StatusLimited) ||
+		err != nil || observed.After(now) || now.Sub(observed) > 10*time.Minute {
+		delete(snap.Metrics, "usage_five_hour")
 		return
 	}
-	pct, age, ok := claude_code.ReadFiveHourCache()
-	if !ok || age > fiveHourCacheMaxAge {
+	if m, ok := snap.Metrics["usage_five_hour"]; ok && m.Used != nil {
+		if !snap.Resets["usage_five_hour"].After(now) {
+			delete(snap.Metrics, "usage_five_hour")
+		}
 		return
 	}
-	if c.Snapshot.Metrics == nil {
-		c.Snapshot.Metrics = map[string]core.Metric{}
+	pct, cachedAt, resetAt, ok := claude_code.ReadFiveHourCache(snap.AccountID)
+	if !ok || !cachedAt.Equal(observed) || !resetAt.After(now) {
+		return
+	}
+	if snap.Metrics == nil {
+		snap.Metrics = map[string]core.Metric{}
 	}
 	limit := 100.0
-	used := pct
-	c.Snapshot.Metrics["usage_five_hour"] = core.Metric{
-		Used:   &used,
-		Limit:  &limit,
-		Unit:   "%",
-		Window: "5h",
+	snap.Metrics["usage_five_hour"] = core.Metric{Used: &pct, Limit: &limit, Unit: "%", Window: "5h"}
+	if snap.Resets == nil {
+		snap.Resets = map[string]time.Time{}
 	}
+	snap.Resets["usage_five_hour"] = resetAt
 }
 
 // populateClaudeCodeSynthetics computes the active billing block (cost,
@@ -253,7 +251,9 @@ func populateClaudeCodeSynthetics(c *Context, opts BuildOptions) {
 	if opts.OfflineClaudePricing {
 		mode = claude_code.CostModeCalculate
 	}
-	events, err := ccevents.Conversations(mode, opts.OfflineClaudePricing)
+	// tmux re-renders every status-interval and shows only the active block
+	// and the latest context, so read just the block lookback window.
+	events, err := ccevents.Recent(mode, opts.OfflineClaudePricing, ccevents.BlockSince(opts.Now), "")
 	if err != nil || len(events) == 0 {
 		return
 	}
