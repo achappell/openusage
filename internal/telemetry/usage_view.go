@@ -319,6 +319,8 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, cacheN
 		if scoped == nil {
 			scoped = &telemetryUsageAgg{}
 		}
+		copyOfScoped := *scoped
+		scoped = &copyOfScoped
 		// If account-scoped query found events, use it.
 		if scoped.EventCount > 0 {
 			scoped.Scope = "account"
@@ -348,6 +350,8 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, cacheN
 	if fallback == nil {
 		fallback = &telemetryUsageAgg{}
 	}
+	copyOfFallback := *fallback
+	fallback = &copyOfFallback
 	fallback.Scope = "provider"
 	return fallback, nil
 }

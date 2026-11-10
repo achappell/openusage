@@ -604,4 +604,3 @@ func TestComputeDisplayInfo_BillingBlockFallbackClassifiesAsUsage(t *testing.T) 
 		t.Fatalf("detail = %q, want '$94.93 5h block'", got.detail)
 	}
 }
-

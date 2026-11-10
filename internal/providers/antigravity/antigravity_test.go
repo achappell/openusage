@@ -3,11 +3,13 @@ package antigravity
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
@@ -284,17 +286,18 @@ func TestAntigravityQuotaWindowAndPacing(t *testing.T) {
 		t.Fatalf("quotaWindow(other) = %q, want quota", got)
 	}
 
-	payloadJSON := `{
+	now := time.Now().UTC()
+	payloadJSON := fmt.Sprintf(`{
   "agent_state": "working",
   "product": "antigravity",
-  "received_at": "2026-09-06T15:00:00Z",
+  "received_at": %q,
   "quota": {
     "gemini-5h": {
       "remaining_fraction": 0.10,
-      "reset_time": "2026-09-06T19:00:00Z"
+      "reset_time": %q
     }
   }
-}`
+}`, now.Format(time.RFC3339), now.Add(4*time.Hour).Format(time.RFC3339))
 	path := filepath.Join(t.TempDir(), "antigravity-status.json")
 	if err := os.WriteFile(path, []byte(payloadJSON), 0600); err != nil {
 		t.Fatal(err)

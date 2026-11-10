@@ -4,6 +4,7 @@
 
 - Update Go and dependencies to fix reported security vulnerabilities.
 - Keep Claude quota observations account-bound and report failed refreshes as unavailable.
+- Avoid concurrent mutation of cached telemetry usage aggregates.
 
 ## Fork 0.27.0 (2026-09-21)
 
