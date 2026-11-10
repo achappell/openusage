@@ -363,32 +363,10 @@ func statuslineNeedsLogs(opts statuslineOptions) bool {
 	return false
 }
 
-const (
-	// How long a cached 5h value is served without touching the daemon. The 5h
-	// window moves slowly, so a short staleness keeps renders instant while
-	// staying fresh. The cache is a single shared file, so parallel sessions
-	// share one refresh rather than each hammering the daemon.
-	fiveHourRefreshInterval = 30 * time.Second
-	// Beyond this, a stale cache is no longer trusted (daemon presumed down).
-	fiveHourMaxAge = 15 * time.Minute
-)
-
-// fiveHourUsagePct resolves the 5h usage-window % cache-first: serve a fresh
-// cached value instantly; otherwise ask the daemon (caching the result); if the
-// daemon is slow/down, fall back to the last-good value within fiveHourMaxAge.
-// Never makes a network call and never blocks longer than the daemon timeout.
+// fiveHourUsagePct uses only the daemon's uniquely identified, fresh sample.
+// A daemon failure or ambiguous account must not revive a cached quota.
 func fiveHourUsagePct() (float64, bool) {
-	if pct, age, ok := claude_code.ReadFiveHourCache(); ok && age < fiveHourRefreshInterval {
-		return pct, true
-	}
-	if pct, ok := fetchFiveHourPctFromDaemon(); ok {
-		claude_code.WriteFiveHourCache(pct)
-		return pct, true
-	}
-	if pct, age, ok := claude_code.ReadFiveHourCache(); ok && age < fiveHourMaxAge {
-		return pct, true
-	}
-	return 0, false
+	return fetchFiveHourPctFromDaemon()
 }
 
 // fetchFiveHourPctFromDaemon reads claude_code's usage_five_hour from the
@@ -401,20 +379,33 @@ func fetchFiveHourPctFromDaemon() (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	for _, s := range snaps {
-		if s.ProviderID != "claude_code" {
+	return fiveHourFromSnapshots(snaps, time.Now())
+}
+
+func fiveHourFromSnapshots(snaps []core.UsageSnapshot, now time.Time) (float64, bool) {
+	var match *core.UsageSnapshot
+	for i := range snaps {
+		if snaps[i].ProviderID != "claude_code" {
 			continue
 		}
-		if m, ok := s.Metrics["usage_five_hour"]; ok && m.Used != nil {
-			return *m.Used, true
+		if match != nil {
+			return 0, false
 		}
+		match = &snaps[i]
+	}
+	if match == nil || match.AccountID == "" ||
+		(match.Status != core.StatusOK && match.Status != core.StatusNearLimit && match.Status != core.StatusLimited) {
+		return 0, false
+	}
+	observed, err := time.Parse(time.RFC3339Nano, match.Attributes["usage_api_observed_at"])
+	if err != nil || observed.After(now) || now.Sub(observed) > 10*time.Minute || !match.Resets["usage_five_hour"].After(now) {
+		return 0, false
+	}
+	if m, ok := match.Metrics["usage_five_hour"]; ok && m.Used != nil && *m.Used >= 0 && *m.Used <= 100 {
+		return *m.Used, true
 	}
 	return 0, false
 }
-
-// The 5h usage cache lives in the claude_code package so the tmux status bar
-// and this statusline share one file and one format — a write from either
-// surface (or the daemon poll) warms the fallback for both.
 
 // readStatuslineInput reads and decodes the stdin payload. A terminal (no pipe)
 // or malformed JSON yields a zero-value input so the command still renders.

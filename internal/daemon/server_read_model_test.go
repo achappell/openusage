@@ -1,6 +1,10 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -66,5 +70,53 @@ func TestMarkDataIngestedAdvancesVersion(t *testing.T) {
 	}
 	if got := svc.dataVersion.Load(); got != 2 {
 		t.Fatalf("data version = %d, want 2", got)
+	}
+}
+
+func TestReadModelMasksPendingClaudeIngestOnCacheHit(t *testing.T) {
+	observed := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	req := ReadModelRequest{Accounts: []ReadModelAccount{
+		{AccountID: "claude", ProviderID: "claude_code"},
+		{AccountID: "other", ProviderID: "openai"},
+	}}
+	previous := core.UsageSnapshot{
+		ProviderID: "claude_code", AccountID: "claude", Timestamp: observed, Status: core.StatusOK,
+		Metrics:    map[string]core.Metric{"usage_five_hour": {Used: ptr(20)}},
+		Attributes: map[string]string{"usage_api_observed_at": observed.Format(time.RFC3339Nano)},
+	}
+	s := &Service{
+		rmCache:   newReadModelCache(),
+		pollState: map[string]*providerPollState{"claude": {needsIngest: true}},
+	}
+	s.rmCache.set(ReadModelRequestKey(req), map[string]core.UsageSnapshot{
+		"claude": previous,
+		"other":  {ProviderID: "openai", AccountID: "other", Status: core.StatusOK},
+	}, 0)
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() ReadModelResponse {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		s.handleReadModel(recorder, httptest.NewRequest(http.MethodPost, "/v1/read-model", bytes.NewReader(body)))
+		var response ReadModelResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	got := read().Snapshots
+	claude := got["claude"]
+	if claude.Status != core.StatusError || len(claude.Metrics) != 0 || claude.Attributes["usage_api_observed_at"] != "" || !claude.Timestamp.Equal(observed) {
+		t.Fatalf("pending ingest exposed old quota: %+v", claude)
+	}
+	if got["other"].Status != core.StatusOK {
+		t.Fatalf("other provider changed: %+v", got["other"])
+	}
+	s.pollState["claude"].needsIngest = false
+	claude = read().Snapshots["claude"]
+	if claude.Status != core.StatusOK || claude.Metrics["usage_five_hour"].Used == nil {
+		t.Fatalf("mask modified the cached snapshot: %+v", claude)
 	}
 }

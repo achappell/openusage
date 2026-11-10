@@ -2,6 +2,7 @@ package claude_code
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -18,9 +19,9 @@ import (
 
 type Provider struct {
 	providerbase.Base
-	mu                  sync.Mutex
-	usageAPICache       *usageResponse // last successful Usage API response
-	lastUsageAuthSource string         // name of the usageAuthSource that last succeeded; empty until a first success
+	mu            sync.Mutex
+	usageAttempts map[string]time.Time
+	usageFailures map[string]bool
 
 	jsonlCacheMu sync.Mutex
 	jsonlCache   map[string]*jsonlCacheEntry // keyed by file path
@@ -356,6 +357,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		Status:      core.StatusOK,
 		Metrics:     make(map[string]core.Metric),
 		Raw:         make(map[string]string),
+		Attributes:  make(map[string]string),
+		Diagnostics: make(map[string]string),
 		Resets:      make(map[string]time.Time),
 		DailySeries: make(map[string][]core.TimePoint),
 	}
@@ -414,12 +417,19 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		hasData = true
 	}
 
-	if orgUUID, ok := snap.Raw["organization_uuid"]; ok && orgUUID != "" {
+	if orgUUID := snap.Raw["organization_uuid"]; orgUUID != "" && snap.Raw["account_uuid"] != "" && acct.ID != "" {
 		if err := p.readUsageAPI(ctx, orgUUID, &snap); err != nil {
 			snap.Raw["usage_api_error"] = err.Error()
+			snap.Diagnostics["usage_api_error"] = err.Error()
+			snap.Status = core.StatusError
+			invalidateFiveHourCache(acct.ID)
 		} else {
 			hasData = true
 		}
+	} else {
+		snap.Status = core.StatusError
+		snap.Diagnostics["usage_api_error"] = "Claude account identity unavailable"
+		invalidateFiveHourCache(acct.ID)
 	}
 
 	normalizeModelUsage(&snap)
@@ -430,7 +440,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, nil
 	}
 
-	snap.Message = "Claude Code CLI · costs are API-equivalent estimates, not subscription charges"
+	if snap.Status == core.StatusError {
+		snap.Message = "Claude quota unavailable"
+	} else {
+		snap.Message = "Claude Code CLI · costs are API-equivalent estimates, not subscription charges"
+	}
 	return snap, nil
 }
 
@@ -501,125 +515,88 @@ func oauthAuthHeaders(token string) func(*http.Request) {
 	}
 }
 
-// readUsageAPI resolves usage data through one of usageAuthSources. Once a
-// source has succeeded, it's pinned (p.lastUsageAuthSource) and later calls
-// go straight to it instead of re-probing every source on every poll; if the
-// pinned source stops working, the pin is cleared so the next call re-scans
-// all sources from scratch.
+// readUsageAPI uses only the identity associated with the local CLI credentials.
+// The lock also serializes attempts so concurrent consumers cannot create a
+// request storm. Failed attempts back off longer than successful ones.
 func (p *Provider) readUsageAPI(ctx context.Context, orgUUID string, snap *core.UsageSnapshot) error {
-	sources := p.usageAuthSources(orgUUID)
-
-	if pinned := p.getLastUsageAuthSource(); pinned != "" {
-		src, ok := findUsageAuthSource(sources, pinned)
-		if ok {
-			if err := p.tryUsageAuthSource(ctx, src, snap); err == nil {
-				return nil
-			}
-			p.setLastUsageAuthSource("")
-		}
-		if p.applyCachedUsage(snap) {
-			return nil
-		}
-		return fmt.Errorf("%s auth source (previously successful) failed and no cached usage available", pinned)
+	if snap.AccountID == "" || orgUUID == "" || snap.Raw["account_uuid"] == "" {
+		return fmt.Errorf("Claude account identity unavailable")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("Claude credential identity unavailable")
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude.json"))
+	if err != nil {
+		return fmt.Errorf("Claude credential identity unavailable")
+	}
+	var local accountConfig
+	if json.Unmarshal(data, &local) != nil || local.OAuthAccount == nil ||
+		local.OAuthAccount.AccountUUID != snap.Raw["account_uuid"] ||
+		local.OAuthAccount.OrganizationUUID != orgUUID {
+		return fmt.Errorf("Claude credential identity does not match account")
 	}
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key := orgUUID + "\x00" + snap.Raw["account_uuid"]
+	if p.usageAttempts == nil {
+		p.usageAttempts = make(map[string]time.Time)
+		p.usageFailures = make(map[string]bool)
+	}
+	interval := 30 * time.Second
+	if p.usageFailures[key] {
+		interval = time.Minute
+	}
+	if time.Since(p.usageAttempts[key]) < interval {
+		return fmt.Errorf("Claude quota refresh is temporarily throttled")
+	}
+	p.usageAttempts[key] = time.Now()
+	p.usageFailures[key] = true
 	var errs []string
-	for _, src := range sources {
-		if err := p.tryUsageAuthSource(ctx, src, snap); err == nil {
-			return nil
-		} else {
+	for _, src := range p.usageAuthSources(orgUUID) {
+		url, setAuth, err := src.prepare()
+		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", src.name, err))
+			continue
 		}
-	}
-
-	if p.applyCachedUsage(snap) {
+		if err := p.tryUsageAuthSource(ctx, src.name, url, setAuth, orgUUID, local.OAuthAccount.EmailAddress, snap); err != nil {
+			// Do not switch credentials after a remote failure or rate limit.
+			return fmt.Errorf("%s: %w", src.name, err)
+		}
+		p.usageFailures[key] = false
 		return nil
 	}
 	return fmt.Errorf("all usage API sources failed: %s", strings.Join(errs, "; "))
 }
 
-func findUsageAuthSource(sources []usageAuthSource, name string) (usageAuthSource, bool) {
-	for _, src := range sources {
-		if src.name == name {
-			return src, true
+// tryUsageAuthSource applies only a successful remote observation.
+func (p *Provider) tryUsageAuthSource(ctx context.Context, source, url string, setAuth func(*http.Request), orgUUID, email string, snap *core.UsageSnapshot) error {
+	if source == "cookie" {
+		if err := verifyCookieIdentity(ctx, setAuth, snap.Raw["account_uuid"], email, orgUUID); err != nil {
+			return err
 		}
-	}
-	return usageAuthSource{}, false
-}
-
-// tryUsageAuthSource attempts a single auth source. On success it applies
-// the fetched usage to snap and pins the source for subsequent calls.
-func (p *Provider) tryUsageAuthSource(ctx context.Context, src usageAuthSource, snap *core.UsageSnapshot) error {
-	url, setAuth, err := src.prepare()
-	if err != nil {
-		return err
 	}
 	usage, err := fetchUsageAPIWithAuth(ctx, url, setAuth)
 	if err != nil {
 		return err
 	}
-	p.applyFetchedUsage(usage, snap, src.name)
-	p.setLastUsageAuthSource(src.name)
-	return nil
-}
-
-// applyFetchedUsage records a freshly fetched usage response as the shared
-// cache and applies it to snap. source names which auth source produced it
-// (e.g. "cookie", "oauth").
-func (p *Provider) applyFetchedUsage(usage *usageResponse, snap *core.UsageSnapshot, source string) {
-	p.setCachedUsage(usage)
-	applyUsageResponse(usage, snap, time.Now())
-	cacheFiveHourFromSnapshot(snap)
+	if currentCacheIdentity() != cacheIdentity(snap.Raw["account_uuid"], orgUUID) {
+		return fmt.Errorf("Claude credential identity changed during refresh")
+	}
+	observedAt := time.Now()
+	applyUsageResponse(usage, snap, observedAt)
+	if _, five := snap.Metrics["usage_five_hour"]; !five {
+		if _, seven := snap.Metrics["usage_seven_day"]; !seven {
+			return fmt.Errorf("usage API returned no current quota")
+		}
+	}
+	snap.EnsureMaps()
+	snap.Attributes["usage_api_observed_at"] = observedAt.Format(time.RFC3339Nano)
 	snap.Raw["usage_api_ok"] = "true"
 	snap.Raw["usage_api_source"] = source
-}
-
-// applyCachedUsage applies the last cached usage response to snap, if any,
-// reporting whether a cached value was available.
-func (p *Provider) applyCachedUsage(snap *core.UsageSnapshot) bool {
-	cached := p.getCachedUsage()
-	if cached == nil {
-		return false
-	}
-	applyUsageResponse(cached, snap, time.Now())
-	snap.Raw["usage_api_cached"] = "true"
-	return true
-}
-
-// cacheFiveHourFromSnapshot persists the freshly-resolved 5h usage % to the
-// shared disk cache. Surfaces that render under a tight time budget (the tmux
-// status bar, the statusline) cannot afford the slow live usage fetch, so any
-// full fetch — most importantly the daemon's 30s poll — warms this fallback
-// for them. Best-effort: a missing metric or unwritable cache is ignored.
-func cacheFiveHourFromSnapshot(snap *core.UsageSnapshot) {
-	if snap == nil {
-		return
-	}
 	if m, ok := snap.Metrics["usage_five_hour"]; ok && m.Used != nil {
-		WriteFiveHourCache(*m.Used)
+		WriteFiveHourCache(snap.AccountID, *m.Used, observedAt, snap.Resets[m.ResetKey])
 	}
-}
-
-func (p *Provider) getCachedUsage() *usageResponse {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.usageAPICache
-}
-
-func (p *Provider) setCachedUsage(u *usageResponse) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.usageAPICache = u
-}
-
-func (p *Provider) getLastUsageAuthSource() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.lastUsageAuthSource
-}
-
-func (p *Provider) setLastUsageAuthSource(name string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.lastUsageAuthSource = name
+	return nil
 }

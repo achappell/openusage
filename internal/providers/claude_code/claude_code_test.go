@@ -84,8 +84,8 @@ func TestProvider_Fetch_WithStatsFile(t *testing.T) {
 		t.Fatalf("Fetch failed: %v", err)
 	}
 
-	if snap.Status != core.StatusOK {
-		t.Errorf("Expected StatusOK, got %v (message: %s)", snap.Status, snap.Message)
+	if snap.Status != core.StatusError {
+		t.Errorf("Expected unavailable quota status, got %v (message: %s)", snap.Status, snap.Message)
 	}
 
 	if snap.Raw["account_email"] != "test@example.com" {
@@ -554,7 +554,7 @@ func TestFloorToHour(t *testing.T) {
 	}
 }
 
-func TestApplyUsageResponse_ClampsExpiredBucketToZero(t *testing.T) {
+func TestApplyUsageResponse_OmitsExpiredBucket(t *testing.T) {
 	now := time.Date(2026, 2, 20, 20, 0, 0, 0, time.UTC)
 	past := now.Add(-10 * time.Second).Format(time.RFC3339)
 	future := now.Add(6 * time.Hour).Format(time.RFC3339)
@@ -576,12 +576,8 @@ func TestApplyUsageResponse_ClampsExpiredBucketToZero(t *testing.T) {
 
 	applyUsageResponse(usage, &snap, now)
 
-	fh, ok := snap.Metrics["usage_five_hour"]
-	if !ok || fh.Used == nil {
-		t.Fatalf("missing usage_five_hour metric")
-	}
-	if *fh.Used != 0 {
-		t.Fatalf("expected usage_five_hour to be clamped to 0, got %.1f", *fh.Used)
+	if _, ok := snap.Metrics["usage_five_hour"]; ok {
+		t.Fatal("expired bucket must not be presented as current usage")
 	}
 
 	sd, ok := snap.Metrics["usage_seven_day"]
@@ -669,8 +665,8 @@ func TestProviderFetch_UsesBackupStatsPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch failed: %v", err)
 	}
-	if snap.Status != core.StatusOK {
-		t.Fatalf("expected StatusOK, got %v (%s)", snap.Status, snap.Message)
+	if snap.Status != core.StatusError {
+		t.Fatalf("expected unavailable quota status, got %v (%s)", snap.Status, snap.Message)
 	}
 	if got := snap.Raw["stats_path"]; got != statsPath {
 		t.Fatalf("expected stats_path %q, got %q", statsPath, got)

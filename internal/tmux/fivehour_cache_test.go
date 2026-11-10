@@ -1,83 +1,66 @@
 package tmux
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 )
 
-func ptr(v float64) *float64 { return &v }
-
-// setTempHome points os.UserHomeDir at a fresh temp dir on all platforms. HOME
-// alone is not enough on Windows, where os.UserHomeDir reads %USERPROFILE%.
 func setTempHome(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
-}
-
-// When the live snapshot carries usage_five_hour, reconcile persists it so a
-// later budget-limited render has a warm fallback.
-func TestReconcileFiveHourWritesCacheWhenPresent(t *testing.T) {
-	setTempHome(t)
-
-	c := &Context{
-		Provider: "claude_code",
-		Snapshot: core.UsageSnapshot{
-			ProviderID: "claude_code",
-			Metrics:    map[string]core.Metric{"usage_five_hour": {Used: ptr(7), Unit: "%", Window: "5h"}},
-		},
-	}
-	reconcileFiveHourUsage(c)
-
-	if pct, _, ok := claude_code.ReadFiveHourCache(); !ok || pct != 7 {
-		t.Fatalf("cache not warmed: ok=%v pct=%v, want ok=true pct=7", ok, pct)
+	if err := os.WriteFile(filepath.Join(dir, ".claude.json"), []byte(`{"oauthAccount":{"accountUuid":"user-id","organizationUuid":"org-id"}}`), 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// When the live snapshot is missing usage_five_hour (the slow usage API didn't
-// resolve within budget), reconcile injects a recent cached value so block_pct
-// still renders instead of the 5h segment silently dropping.
-func TestReconcileFiveHourInjectsFromCacheWhenMissing(t *testing.T) {
+func TestReconcileFiveHourScopedFreshCache(t *testing.T) {
 	setTempHome(t)
-	claude_code.WriteFiveHourCache(13)
-
-	c := &Context{
-		Provider: "claude_code",
-		Snapshot: core.UsageSnapshot{
-			ProviderID: "claude_code",
-			Metrics:    map[string]core.Metric{"today_api_cost": {Used: ptr(98.7), Unit: "USD"}},
-		},
-	}
+	now := time.Now().UTC().Truncate(time.Second)
+	reset := now.Add(time.Hour)
+	claude_code.WriteFiveHourCache("a", 13, now, reset)
+	c := &Context{Now: now, Provider: "claude_code", Snapshot: core.UsageSnapshot{ProviderID: "claude_code", AccountID: "a", Status: core.StatusOK, Attributes: map[string]string{"usage_api_observed_at": now.Format(time.RFC3339Nano)}}}
 	reconcileFiveHourUsage(c)
-
-	m, ok := c.Snapshot.Metrics["usage_five_hour"]
-	if !ok || m.Used == nil {
-		t.Fatalf("usage_five_hour not injected from cache")
-	}
-	if *m.Used != 13 {
-		t.Errorf("injected pct = %v, want 13", *m.Used)
-	}
-	// block_pct must now resolve through the normal alias chain.
-	r := &renderer{ctx: *c}
-	if v, ok := r.resolve("block_pct"); !ok || v != "13" {
-		t.Errorf("block_pct resolve = %q ok=%v, want \"13\" ok=true", v, ok)
+	if got := c.Snapshot.Metrics["usage_five_hour"].Used; got == nil || *got != 13 {
+		t.Fatalf("expected scoped cached quota, got %v", got)
 	}
 }
 
-// A cold cache leaves the segment empty rather than fabricating a value.
-func TestReconcileFiveHourNoCacheLeavesMissing(t *testing.T) {
+func TestReconcileFiveHourRejectsFailureStaleAndOtherAccount(t *testing.T) {
 	setTempHome(t)
-
-	c := &Context{
-		Provider: "claude_code",
-		Snapshot: core.UsageSnapshot{ProviderID: "claude_code", Metrics: map[string]core.Metric{}},
+	now := time.Now().UTC().Truncate(time.Second)
+	claude_code.WriteFiveHourCache("a", 13, now, now.Add(time.Hour))
+	for _, tc := range []struct {
+		account  string
+		status   core.Status
+		observed time.Time
+	}{
+		{"b", core.StatusOK, now}, {"a", core.StatusError, now}, {"a", core.StatusOK, now.Add(-11 * time.Minute)}, {"", core.StatusOK, now},
+	} {
+		c := &Context{Now: now, Provider: "claude_code", Snapshot: core.UsageSnapshot{ProviderID: "claude_code", AccountID: tc.account, Status: tc.status, Attributes: map[string]string{"usage_api_observed_at": tc.observed.Format(time.RFC3339Nano)}}}
+		reconcileFiveHourUsage(c)
+		if _, ok := c.Snapshot.Metrics["usage_five_hour"]; ok {
+			t.Fatalf("injected unsafe cached quota: %+v", tc)
+		}
 	}
-	reconcileFiveHourUsage(c)
+}
 
+func TestReconcileFiveHourDropsExpiredSnapshot(t *testing.T) {
+	now := time.Now().UTC()
+	c := &Context{Now: now, Provider: "claude_code", Snapshot: core.UsageSnapshot{
+		ProviderID: "claude_code", AccountID: "a", Status: core.StatusOK,
+		Attributes: map[string]string{"usage_api_observed_at": now.Format(time.RFC3339Nano)},
+		Metrics:    map[string]core.Metric{"usage_five_hour": {Used: new(100.0), Unit: "%", Window: "5h"}},
+		Resets:     map[string]time.Time{"usage_five_hour": now},
+	}}
+	reconcileFiveHourUsage(c)
 	if _, ok := c.Snapshot.Metrics["usage_five_hour"]; ok {
-		t.Errorf("expected no injection when cache is cold")
+		t.Fatal("expired quota retained")
 	}
 }

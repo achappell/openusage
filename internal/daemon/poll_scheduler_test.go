@@ -27,6 +27,22 @@ func TestPollScheduler_ShouldPoll_RespectsBaseInterval(t *testing.T) {
 	}
 }
 
+func TestPollScheduler_RemoteMinimumBoundsShortBaseInterval(t *testing.T) {
+	ps := newPollScheduler(time.Second)
+	if !ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("first poll should run")
+	}
+	ps.RecordPoll("claude", true)
+	ps.states["claude"].lastPollAt = time.Now().Add(-10 * time.Second)
+	if ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("remote minimum should prevent a premature fetch")
+	}
+	ps.states["claude"].lastPollAt = time.Now().Add(-31 * time.Second)
+	if !ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("remote poll should run after its minimum interval")
+	}
+}
+
 func TestPollScheduler_BackoffTiers(t *testing.T) {
 	ps := newPollScheduler(30 * time.Second)
 

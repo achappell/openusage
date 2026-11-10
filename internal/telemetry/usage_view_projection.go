@@ -61,11 +61,20 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	_, hasFiveHourAfter := snap.Metrics["usage_five_hour"]
 	core.Tracef("[usage_view] %s: cleanup deleted %d/%d metrics, usage_five_hour before=%v after=%v",
 		snap.ProviderID, deletedCount, metricsBefore, hadFiveHourBefore, hasFiveHourAfter)
+	// Provider quota provenance is not telemetry-derived usage metadata.
+	observedAt, hasObservedAt := snap.Attributes["usage_api_observed_at"]
+	quotaError, hasQuotaError := snap.Diagnostics["usage_api_error"]
 	telemetryPrefixes := []string{"source_", "client_", "tool_", "model_", "project_", "provider_", "usage_", "analytics_"}
 	extendedPrefixes := append(telemetryPrefixes, "lang_", "jsonl_")
 	deleteByPrefixes(snap.Raw, extendedPrefixes)
 	deleteByPrefixes(snap.Attributes, telemetryPrefixes)
 	deleteByPrefixes(snap.Diagnostics, telemetryPrefixes)
+	if hasObservedAt {
+		snap.Attributes["usage_api_observed_at"] = observedAt
+	}
+	if hasQuotaError {
+		snap.Diagnostics["usage_api_error"] = quotaError
+	}
 	for key := range snap.DailySeries {
 		if strings.HasPrefix(key, "usage_model_") ||
 			strings.HasPrefix(key, "usage_source_") ||
