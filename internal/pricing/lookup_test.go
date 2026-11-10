@@ -298,6 +298,7 @@ func TestLookup_StaleFallbackBacksOffBeforeRetrying(t *testing.T) {
 	if first == 0 {
 		t.Fatal("expected an upstream attempt on first lookup")
 	}
+	initialGeneration := r.Generation()
 
 	// Inside the backoff window: serve the stale copy, do not re-dial.
 	clk.Advance(StaleRetryInterval / 2)
@@ -310,10 +311,52 @@ func TestLookup_StaleFallbackBacksOffBeforeRetrying(t *testing.T) {
 
 	// Past the backoff window: try again.
 	clk.Advance(StaleRetryInterval * 2)
-	if _, err := r.Lookup(context.Background(), "claude-3-5-sonnet", 1000); err != nil {
+	if r.Generation() == initialGeneration {
+		t.Fatal("generation did not change at stale retry deadline")
+	}
+	if _, err := r.Lookup(context.Background(), "claude-3-5-sonnet", 0); err != nil {
 		t.Fatalf("Lookup #3: %v", err)
 	}
 	if got := atomic.LoadInt32(&hits); got <= first {
 		t.Errorf("after backoff: got %d upstream attempts, want more than %d", got, first)
+	}
+}
+
+func TestResolverGenerationBumpsOnTableStore(t *testing.T) {
+	r := &Resolver{}
+	if got := r.Generation(); got != 0 {
+		t.Fatalf("fresh resolver generation = %d, want 0", got)
+	}
+	r.storeLiteLLM(map[string]Price{}, time.Time{}, time.Time{})
+	r.storeOpenRouter(map[string]Price{}, time.Time{}, time.Time{})
+	if got := r.Generation(); got != 2 {
+		t.Fatalf("generation after two table stores = %d, want 2", got)
+	}
+}
+
+func TestResolverGenerationExpiresMemoizedPrices(t *testing.T) {
+	clk := &fakeClock{t: time.Now()}
+	r, hits, _ := newTestResolver(t, "litellm_subset.json", "openrouter_subset.json", withClock(clk.Now))
+	if _, err := r.Lookup(context.Background(), "claude-3-5-sonnet", 0); err != nil {
+		t.Fatal(err)
+	}
+	initial := r.Generation()
+	clk.Advance(30 * time.Minute)
+	if got := r.Generation(); got != initial {
+		t.Fatalf("generation within TTL = %d, want %d", got, initial)
+	}
+	clk.Advance(31 * time.Minute)
+	expired := r.Generation()
+	if expired == initial {
+		t.Fatal("generation did not change when memoized prices expired")
+	}
+	if got := r.Generation(); got != expired {
+		t.Fatalf("generation changed repeatedly without a new lookup: %d != %d", got, expired)
+	}
+	if _, err := r.Lookup(context.Background(), "claude-3-5-sonnet", 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(hits); got != 2 {
+		t.Fatalf("upstream hits after expiry = %d, want 2", got)
 	}
 }

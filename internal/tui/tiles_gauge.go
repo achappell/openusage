@@ -12,6 +12,9 @@ import (
 )
 
 func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) []string {
+	if snap.ProviderID == "codex" {
+		return buildCodexQuotaLines(snap, innerW, m.warnThreshold, m.critThreshold, m.viewNow())
+	}
 	maxLabelW := 14
 	gaugeW := innerW - maxLabelW - 10 // label + gauge + " XX.X%" + spaces
 	if gaugeW < 6 {
@@ -59,7 +62,11 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 			label = label[:maxLabelW-1] + "…"
 		}
 
+		isRatio := core.IsRatioMetricKey(key)
 		gauge := RenderUsageGauge(usedPct, gaugeW, m.warnThreshold, m.critThreshold)
+		if isRatio {
+			gauge = RenderRatioGauge(usedPct, gaugeW)
+		}
 
 		// Check for stacked gauge configuration
 		if sgCfg, ok := widget.StackedGaugeKeys[key]; ok && len(sgCfg.SegmentMetricKeys) > 0 {
@@ -75,7 +82,7 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		// Append a dim projection annotation when the metric has a
 		// recognized window + a reset timestamp. Pace mirrors the detail
 		// view computation (current% / elapsed minutes / 100).
-		if annot := tileGaugeProjectionAnnotation(snap, key, met, usedPct, now); annot != "" {
+		if annot := tileGaugeProjectionAnnotation(snap, key, met, usedPct, now); annot != "" && !isRatio {
 			lines = append(lines, annotationIndent+dimStyle.Render(annot))
 		}
 

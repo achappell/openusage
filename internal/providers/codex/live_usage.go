@@ -302,6 +302,11 @@ func clearRateLimitMetrics(snap *core.UsageSnapshot) {
 			delete(snap.Resets, key)
 		}
 	}
+	for key := range snap.Raw {
+		if strings.HasPrefix(key, "rate_limit_") && (strings.HasSuffix(key, "_bucket") || strings.HasSuffix(key, "_name")) {
+			delete(snap.Raw, key)
+		}
+	}
 }
 
 func clampPercent(v float64) float64 {

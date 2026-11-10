@@ -25,6 +25,7 @@ type ViewRuntime struct {
 
 	stateMu    sync.RWMutex
 	state      DaemonState
+	warning    string
 	timeWindow core.TimeWindow
 }
 
@@ -86,12 +87,17 @@ func (r *ViewRuntime) EnsureClient(ctx context.Context) *Client {
 	ensureCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
 
-	client, err := EnsureRunning(ensureCtx, r.socketPath, r.verbose)
+	client, warning, err := EnsureRunning(ensureCtx, r.socketPath, r.verbose)
 	if err != nil {
+		r.setWarning("")
 		r.setState(ClassifyEnsureError(err))
 		return nil
 	}
-	r.setState(DaemonState{Status: DaemonStatusRunning})
+	if warning != "" && warning != r.Warning() {
+		log.Printf("telemetry daemon: %s", warning)
+	}
+	r.setWarning(warning)
+	r.setState(r.runningState())
 	r.SetClient(client)
 	return client
 }
@@ -103,6 +109,29 @@ func (r *ViewRuntime) setState(state DaemonState) {
 	r.stateMu.Lock()
 	r.state = state
 	r.stateMu.Unlock()
+}
+
+// Warning returns the degraded-mode warning from the last daemon ensure, or ""
+// when the daemon matches this build.
+func (r *ViewRuntime) Warning() string {
+	if r == nil {
+		return ""
+	}
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return r.warning
+}
+
+func (r *ViewRuntime) setWarning(w string) {
+	r.stateMu.Lock()
+	r.warning = w
+	r.stateMu.Unlock()
+}
+
+// runningState is the Running state, carrying the degraded-mode warning (if
+// any) so the TUI can surface it without blocking.
+func (r *ViewRuntime) runningState() DaemonState {
+	return DaemonState{Status: DaemonStatusRunning, Warning: r.Warning()}
 }
 
 func (r *ViewRuntime) State() DaemonState {
@@ -183,7 +212,7 @@ func (r *ViewRuntime) fetchReadModel(
 	cancel()
 
 	if err == nil {
-		r.setState(DaemonState{Status: DaemonStatusRunning})
+		r.setState(r.runningState())
 		return snaps, nil
 	}
 
@@ -212,17 +241,8 @@ func StartBroadcaster(
 	handler SnapshotHandler,
 	stateHandler StateHandler,
 ) {
-	interval := refreshInterval / 3
-	if interval <= 0 {
-		interval = 4 * time.Second
-	}
-	interval = max(1*time.Second, min(5*time.Second, interval))
-
-	emitState := func() {
-		if stateHandler != nil {
-			stateHandler(rt.State())
-		}
-	}
+	interval := broadcastInterval(refreshInterval)
+	emitState := newStateEmitter(rt, stateHandler)
 
 	go func() {
 		emitState()
@@ -252,6 +272,39 @@ func StartBroadcaster(
 			}
 		}
 	}()
+}
+
+// broadcastInterval is how often the TUI re-reads the daemon read model once
+// warm-up is done. The daemon only collects and polls once per refresh
+// interval, so reading faster finds the same data and wakes the TUI for
+// nothing.
+func broadcastInterval(refreshInterval time.Duration) time.Duration {
+	if refreshInterval <= 0 {
+		return 30 * time.Second
+	}
+	return max(1*time.Second, refreshInterval)
+}
+
+// newStateEmitter returns a func that forwards rt's daemon state to handler
+// only when it differs from the last state forwarded. Every forwarded state
+// becomes a tea message and a re-render, so repeating an unchanged state kept
+// an idle TUI from ever resting.
+func newStateEmitter(rt *ViewRuntime, handler StateHandler) func() {
+	var (
+		last    DaemonState
+		emitted bool
+	)
+	return func() {
+		if handler == nil {
+			return
+		}
+		state := rt.State()
+		if emitted && state == last {
+			return
+		}
+		last, emitted = state, true
+		handler(state)
+	}
 }
 
 // snapshotFingerprint builds a lightweight fingerprint from snapshot keys,

@@ -2,6 +2,7 @@ package claude_code
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -21,9 +22,21 @@ type Provider struct {
 	mu                  sync.Mutex
 	usageAPICache       *usageResponse // last successful Usage API response
 	lastUsageAuthSource string         // name of the usageAuthSource that last succeeded; empty until a first success
+	usageAPIFetchedAt   time.Time      // when usageAPICache was last refreshed from the network
+	usageAPIRetryAt     time.Time      // no usage API call before this (429/5xx backoff)
+	usageAPIFailures    int            // consecutive throttled usage API responses
 
 	jsonlCacheMu sync.Mutex
 	jsonlCache   map[string]*jsonlCacheEntry // keyed by file path
+
+	// convAgg memoises the cross-file merge (dedup, 5h block chain) and the
+	// reduced all-time totals for the last set of file entries. Guarded by
+	// jsonlCacheMu.
+	convAgg *conversationAggCache
+
+	// nowFn overrides the wall clock used for today/7d/5h-block windows.
+	// Tests set it to pin golden values; nil means time.Now.
+	nowFn func() time.Time
 
 	telemetryCacheMu             sync.Mutex
 	telemetryCache               map[string]*telemetryCacheEntry // keyed by file path
@@ -35,7 +48,21 @@ type Provider struct {
 type jsonlCacheEntry struct {
 	modTime time.Time
 	size    int64
-	records []conversationRecord
+	records []conversationRecord // stably sorted by timestamp
+
+	// Precomputed per-record dedup keys: usageKeys[i] is "" when record i has
+	// no usage; toolKeys[i][j] is "" when content item j is not a tool_use.
+	usageKeys []string
+	toolKeys  [][]string
+
+	// This file's contribution to the all-time aggregates, excluding the
+	// records that lost cross-file dedup (lostUsage / lostTools, ascending).
+	// Rebuilt only when those sets or the pricing generation change.
+	allTime   *conversationAllTime
+	costs     []float64 // per-record estimated cost for dedup winners
+	lostUsage []int
+	lostTools []toolSlot
+	priceGen  uint64
 }
 
 // telemetryCacheEntry tracks the last parsed position for a single JSONL file.
@@ -267,6 +294,12 @@ func findPricing(model string) localPricing {
 // hardcoded-family fallback path.
 var priceLookup = func(ctx context.Context, model string, ctxLen int) (*pricing.Price, error) {
 	return pricing.DefaultResolver().Lookup(ctx, model, ctxLen)
+}
+
+// priceGeneration reports the pricing resolver's table generation. Cached
+// per-file cost aggregates are rebuilt when it changes.
+var priceGeneration = func() uint64 {
+	return pricing.DefaultResolver().Generation()
 }
 
 // priceLookupTimeout bounds the dynamic pricing query so a slow or hung
@@ -507,13 +540,32 @@ func oauthAuthHeaders(token string) func(*http.Request) {
 // pinned source stops working, the pin is cleared so the next call re-scans
 // all sources from scratch.
 func (p *Provider) readUsageAPI(ctx context.Context, orgUUID string, snap *core.UsageSnapshot) error {
+	now := time.Now()
+	if wait, throttled := p.usageAPIHold(now); wait {
+		if p.applyCachedUsage(snap) {
+			return nil
+		}
+		if throttled {
+			return fmt.Errorf("usage API backing off after HTTP 429/5xx")
+		}
+	}
+
 	sources := p.usageAuthSources(orgUUID)
 
 	if pinned := p.getLastUsageAuthSource(); pinned != "" {
 		src, ok := findUsageAuthSource(sources, pinned)
 		if ok {
-			if err := p.tryUsageAuthSource(ctx, src, snap); err == nil {
+			err := p.tryUsageAuthSource(ctx, src, snap)
+			if err == nil {
 				return nil
+			}
+			// A 429/5xx says nothing about the auth method: keep the pin and
+			// back off instead of falling through to the other sources.
+			if p.noteUsageAPIThrottle(err) {
+				if p.applyCachedUsage(snap) {
+					return nil
+				}
+				return err
 			}
 			p.setLastUsageAuthSource("")
 		}
@@ -525,10 +577,16 @@ func (p *Provider) readUsageAPI(ctx context.Context, orgUUID string, snap *core.
 
 	var errs []string
 	for _, src := range sources {
-		if err := p.tryUsageAuthSource(ctx, src, snap); err == nil {
+		err := p.tryUsageAuthSource(ctx, src, snap)
+		if err == nil {
 			return nil
-		} else {
-			errs = append(errs, fmt.Sprintf("%s: %v", src.name, err))
+		}
+		errs = append(errs, fmt.Sprintf("%s: %v", src.name, err))
+		if p.noteUsageAPIThrottle(err) {
+			// The source authenticated but the API is throttling: remember
+			// it and stop probing the rest.
+			p.setLastUsageAuthSource(src.name)
+			break
 		}
 	}
 
@@ -536,6 +594,54 @@ func (p *Provider) readUsageAPI(ctx context.Context, orgUUID string, snap *core.
 		return nil
 	}
 	return fmt.Errorf("all usage API sources failed: %s", strings.Join(errs, "; "))
+}
+
+// usageAPIMinInterval is how long a fetched usage response is served from
+// memory before the API is called again. The quota windows it reports (5h,
+// 7d) move slowly, and the endpoint rate-limits aggressive callers.
+var usageAPIMinInterval = 3 * time.Minute
+
+const (
+	usageAPIBackoffBase = time.Minute
+	usageAPIBackoffMax  = 30 * time.Minute
+)
+
+// usageAPIHold reports whether the usage API should not be called now,
+// either because the cache is fresh (TTL) or because of a 429/5xx backoff.
+func (p *Provider) usageAPIHold(now time.Time) (hold, throttled bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if now.Before(p.usageAPIRetryAt) {
+		return true, true
+	}
+	if p.usageAPICache != nil && now.Sub(p.usageAPIFetchedAt) < usageAPIMinInterval {
+		return true, false
+	}
+	return false, false
+}
+
+// noteUsageAPIThrottle records exponential backoff (honouring Retry-After)
+// when err is a 429/5xx and reports whether it was one.
+func (p *Provider) noteUsageAPIThrottle(err error) bool {
+	var statusErr *usageAPIStatusError
+	if !errors.As(err, &statusErr) || !statusErr.Throttled() {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.usageAPIFailures++
+	wait := usageAPIBackoffBase
+	for i := 1; i < p.usageAPIFailures && wait < usageAPIBackoffMax; i++ {
+		wait *= 2
+	}
+	if statusErr.RetryAfter > wait {
+		wait = statusErr.RetryAfter
+	}
+	if wait > usageAPIBackoffMax {
+		wait = usageAPIBackoffMax
+	}
+	p.usageAPIRetryAt = time.Now().Add(wait)
+	return true
 }
 
 func findUsageAuthSource(sources []usageAuthSource, name string) (usageAuthSource, bool) {
@@ -610,6 +716,9 @@ func (p *Provider) setCachedUsage(u *usageResponse) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.usageAPICache = u
+	p.usageAPIFetchedAt = time.Now()
+	p.usageAPIRetryAt = time.Time{}
+	p.usageAPIFailures = 0
 }
 
 func (p *Provider) getLastUsageAuthSource() string {

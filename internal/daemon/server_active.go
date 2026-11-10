@@ -58,7 +58,7 @@ func (s *Service) computeActiveDetails(ctx context.Context) (activeComputation, 
 		}
 	}
 
-	req, err := BuildReadModelRequestFromConfig()
+	req, _, err := s.cachedReadModelRequest(ctx)
 	if err != nil {
 		return activeComputation{}, fmt.Errorf("daemon: building read-model request: %w", err)
 	}

@@ -120,7 +120,7 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 
 ### Tool / language / file usage
 
-- Source: `content[].tool_use` and the tool's input map (e.g. `file_path`, `path`, `command`).
+- Source: `content[].tool_use` and the tool's input map (e.g. `file_path`, `path`, `command`). Claude Code streams one assistant message as several JSONL lines that share a `message.id` / `requestId`, one content block per line, so a message's tool calls usually sit on its later lines. OpenUsage merges those lines into one turn: content blocks are unioned (a `tool_use` counts once per `tool_use` id), and token counts take the per-field maximum because every line repeats the message's usage, with the final output count on the last line.
 - Transform:
   - Tool counts by tool name (`Edit`, `Read`, `Bash`, etc.) → `Metrics["tool_*"]`.
   - File extensions inferred from path candidates → language histogram.
@@ -152,6 +152,7 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 - Source (fallback, all platforms): when desktop-app cookie extraction is unavailable — anywhere but macOS, or when the desktop app isn't installed — the provider reads the Claude Code CLI's own OAuth access token from `~/.claude/.credentials.json` and calls `GET https://api.anthropic.com/api/oauth/usage`. This needs no organization UUID (the token is account-scoped) and no desktop app, so the 5h/7d gauges work on Linux and Windows. An expired token is skipped (Claude Code refreshes it on next use).
 - Source selection: the provider tries the cookie source before OAuth, pins the first source that succeeds for later polls, and clears that pin when the source fails so the next poll can probe both sources again. A cached response is used while the failed source is being recovered.
 - Transform: the response (same `five_hour` / `seven_day` utilization shape from either source) populates the gauges and warms the shared 5h cache read by the statusline and tmux segments.
+- Rate: a successful response is reused for 3 minutes, so the usage API is called at most once per 3 minutes however often the provider is polled. On HTTP 429 or 5xx the provider keeps the auth method that worked, serves the cached response, and backs off from 1 minute, doubling each time up to 30 minutes, or longer if `Retry-After` asks for it (also capped at 30 minutes). The desktop app's keychain key is looked up once per process, and each `security` lookup times out after 5 seconds.
 
 ### Auth status
 
@@ -164,7 +165,8 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 
 ### How fresh is the data?
 
-- Polling: every 30 s by default. JSONL files are re-parsed only when their mtime/size changes; otherwise served from cache.
+- Polling: every 30 s by default. Each JSONL file is read incrementally: a poll decodes only the lines appended since the previous poll, and a line still being written is picked up once it is complete. A file that shrank or was replaced is read again from the start. When the new lines are newer than everything already counted (the normal case for a live session), the all-time totals are updated with just those lines instead of being recomputed across every file. The today, 7-day, and 5-hour-block figures are recomputed each poll from recent records only.
+- Change detection: the dashboard re-polls when any session file under `~/.claude/projects` changes, including appends to files in nested project folders.
 - Hook (when integration is installed): real-time per turn.
 
 ## Files read

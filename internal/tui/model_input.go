@@ -34,10 +34,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case DaemonStatusMsg:
+		warning := strings.TrimSpace(msg.Warning)
+		changed := m.daemon.status != msg.Status ||
+			m.daemon.message != msg.Message ||
+			m.daemon.warning != warning
 		m.daemon.status = msg.Status
 		m.daemon.message = msg.Message
+		m.daemon.warning = warning
 		if msg.Status == DaemonRunning {
 			m.daemon.installing = false
+		}
+		// An unchanged status has nothing new to animate; waking the tick
+		// chain for it kept an idle dashboard re-rendering.
+		if !changed {
+			return m, nil
 		}
 		return m, m.restartTickIfNeeded()
 
@@ -229,12 +239,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleTickMsg(_ tickMsg) (tea.Model, tea.Cmd) {
 	m.animFrame++
+	m.trackLoading(time.Now())
 	interval := m.nextTickInterval()
 	if interval == 0 {
 		m.tickRunning = false
 		return m, nil
 	}
 	return m, scheduleTickCmd(interval)
+}
+
+// trackLoading records when the current splash or refresh started and clears
+// a refresh that has waited longer than refreshTimeout for its snapshots.
+func (m *Model) trackLoading(now time.Time) {
+	if m.hasData && !m.refreshing {
+		m.loadingSince = time.Time{}
+		return
+	}
+	if m.loadingSince.IsZero() {
+		m.loadingSince = now
+		return
+	}
+	if m.hasData && m.refreshing && now.Sub(m.loadingSince) >= refreshTimeout {
+		m.refreshing = false
+		m.loadingSince = time.Time{}
+	}
 }
 
 func (m Model) handleDaemonInstallResultMsg(msg daemonInstallResultMsg) (tea.Model, tea.Cmd) {
@@ -284,6 +312,11 @@ func (m Model) handleSnapshotsMsg(msg SnapshotsMsg) (tea.Model, tea.Cmd) {
 	}
 	m.ensureSnapshotProvidersKnown()
 	m.rebuildSortedIDs()
+	if m.tileOffset > 0 && m.mode == modeList {
+		// Fresh data can shrink the stacked content; keep the panel offset
+		// inside the new bounds so scrolling up responds immediately.
+		m.clampPanelScroll()
+	}
 	return m, m.restartTickIfNeeded()
 }
 
@@ -391,7 +424,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.mode == modeList && (m.shouldUseWidgetScroll() || m.shouldUsePanelScroll()) {
+	if m.mode == modeList && m.shouldUsePanelScroll() {
+		m.scrollPanelBy(scroll)
+		return m, nil
+	}
+	if m.mode == modeList && m.shouldUseWidgetScroll() {
 		m.tileOffset += scroll
 		if m.tileOffset < 0 {
 			m.tileOffset = 0
@@ -810,6 +847,7 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	ids := m.filteredIDs()
 	cols := m.tileCols()
 	scrollModeWidget := m.shouldUseWidgetScroll()
+	scrollModePanel := m.shouldUsePanelScroll()
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -834,13 +872,18 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.tileOffset = 0
 		}
 	case "pgdown", "ctrl+d":
-		if scrollModeWidget {
+		switch {
+		case scrollModePanel:
+			m.scrollPanelBy(m.tileScrollStep())
+		case scrollModeWidget:
 			m.tileOffset += m.widgetScrollStep()
-		} else {
+		default:
 			m.tileOffset += m.tileScrollStep()
 		}
 	case "pgup", "ctrl+u":
-		if scrollModeWidget {
+		if scrollModePanel {
+			m.scrollPanelBy(-m.tileScrollStep())
+		} else if scrollModeWidget {
 			m.tileOffset -= m.widgetScrollStep()
 		} else {
 			m.tileOffset -= m.tileScrollStep()
@@ -856,6 +899,11 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tileOffset = 0
 	case "end":
 		m.tileOffset = 9999
+		if scrollModePanel {
+			// Pin to the real bottom so PgUp/wheel-up respond on the
+			// first press instead of burning off the overshoot.
+			m.clampPanelScroll()
+		}
 	case "enter":
 		m = m.enterDetailMode()
 	case "/":

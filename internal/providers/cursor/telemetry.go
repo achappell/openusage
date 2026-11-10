@@ -43,26 +43,84 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	seenTools := make(map[string]bool)
 	var out []shared.TelemetryEvent
 
+	// The previous Collect's batch has been ingested by now; persist the
+	// state DB marks it advanced.
+	p.persistStateMarks(ctx)
+
+	// The daemon calls Collect every collect interval, and the store dedups
+	// everything again on ingest. When a DB is byte-for-byte where it was at
+	// the last successful collect, it cannot yield anything new, so skip it.
+	// This also lets the collect loop back off.
+	trackingFP, stateFP := sqliteFileFingerprint(trackingDBPath), sqliteFileFingerprint(stateDBPath)
+
 	// Collect from the tracking DB (ai_code_hashes + scored_commits).
-	if trackingDBPath != "" {
+	if trackingDBPath != "" && !p.collectUnchanged(trackingDBPath, trackingFP) {
 		events, commitEvents, err := collectTrackingDBEvents(ctx, trackingDBPath)
 		if err != nil {
 			return nil, fmt.Errorf("collect cursor tracking telemetry: %w", err)
 		}
 		appendCursorDedupEvents(&out, events, seenMessages, seenTools)
 		appendCursorDedupEvents(&out, commitEvents, seenMessages, seenTools)
+		p.recordCollect(trackingDBPath, trackingFP)
 	}
 
-	// Collect from the state DB (composerData + bubbleId entries).
-	if stateDBPath != "" {
-		events, err := collectStateDBEvents(ctx, stateDBPath)
+	// Collect from the state DB (composerData + bubbleId entries). It can be
+	// multiple GB with every row going through json_extract, so only rows
+	// written since the last collect are read (see state_incremental.go).
+	if stateDBPath != "" && !p.collectUnchanged(stateDBPath, stateFP) {
+		events, err := p.collectStateDBEventsIncremental(ctx, stateDBPath)
 		if err != nil {
 			return nil, fmt.Errorf("collect cursor state telemetry: %w", err)
 		}
 		appendCursorDedupEvents(&out, events, seenMessages, seenTools)
+		p.recordCollect(stateDBPath, stateFP)
 	}
 
 	return out, nil
+}
+
+// sqliteFileFingerprint summarises a SQLite DB and its WAL by size and mtime.
+// Writes land in the -wal file first and in the main file on checkpoint, so
+// any write changes at least one of them. Returns "" when the DB is missing.
+func sqliteFileFingerprint(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	fp := ""
+	for _, p := range []string{path, path + "-wal"} {
+		info, err := os.Stat(p)
+		if err != nil {
+			if p == path {
+				return ""
+			}
+			continue
+		}
+		fp += fmt.Sprintf("%d:%d;", info.Size(), info.ModTime().UnixNano())
+	}
+	return fp
+}
+
+// collectUnchanged reports whether path still has the fingerprint recorded at
+// its last successful collect.
+func (p *Provider) collectUnchanged(path, fp string) bool {
+	if fp == "" {
+		return false
+	}
+	p.collectFPMu.Lock()
+	defer p.collectFPMu.Unlock()
+	return p.collectFP[path] == fp
+}
+
+func (p *Provider) recordCollect(path, fp string) {
+	if fp == "" {
+		return
+	}
+	p.collectFPMu.Lock()
+	defer p.collectFPMu.Unlock()
+	if p.collectFP == nil {
+		p.collectFP = make(map[string]string)
+	}
+	p.collectFP[path] = fp
 }
 
 // ParseHookPayload implements shared.TelemetrySource. Cursor does not have a
@@ -111,7 +169,10 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 		return nil, nil, nil
 	}
 
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", dbPath))
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil, nil, nil
+	}
+	db, err := openCursorDBReadOnly(dbPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -185,8 +246,9 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 	return out, commitEvents, nil
 }
 
-// collectStateDBEvents reads composerData and bubbleId entries from the
-// Cursor state database (cursorDiskKV table).
+// collectStateDBEvents reads all composerData and bubbleId entries from the
+// Cursor state database (cursorDiskKV table), plus the daily stats. Collect
+// uses the incremental variant; this full read is the reference it must match.
 func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.TelemetryEvent, error) {
 	if strings.TrimSpace(dbPath) == "" {
 		return nil, nil
@@ -198,9 +260,8 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 		}
 		return nil, fmt.Errorf("stat cursor state db: %w", err)
 	}
-	dbMtime := fi.ModTime().UTC()
 
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", dbPath))
+	db, err := openCursorDBReadOnly(dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -209,44 +270,9 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 	if !cursorTableExists(ctx, db, "cursorDiskKV") {
 		return nil, nil
 	}
-
-	var out []shared.TelemetryEvent
-	composerRecords, err := loadComposerSessionRecords(ctx, db)
-	if err != nil {
-		return nil, fmt.Errorf("load cursor composer session records: %w", err)
-	}
-	bubbleRecords, err := loadBubbleRecords(ctx, db)
-	if err != nil {
-		return nil, fmt.Errorf("load cursor bubble records: %w", err)
-	}
-	sessionTimestamps := composerSessionTimestampMap(composerRecords)
-
-	composerEvents := composerEventsFromRecords(composerRecords, dbPath)
-	if len(composerEvents) > 0 {
-		out = append(out, composerEvents...)
-	}
-
-	toolEvents := toolEventsFromBubbleRecords(bubbleRecords, sessionTimestamps, dbMtime, dbPath)
-	if len(toolEvents) > 0 {
-		out = append(out, toolEvents...)
-	}
-
-	tokenEvents := bubbleTokenEventsFromRecords(bubbleRecords, sessionTimestamps, dbMtime, dbPath)
-	if len(tokenEvents) > 0 {
-		out = append(out, tokenEvents...)
-	}
-
-	// Collect daily stats (tab/composer suggested/accepted lines).
-	if cursorTableExists(ctx, db, "ItemTable") {
-		dailyEvents, err := collectDailyStatsEvents(ctx, db, dbPath)
-		if err != nil {
-			return nil, fmt.Errorf("collect cursor daily stats telemetry: %w", err)
-		}
-		out = append(out, dailyEvents...)
-	}
-
-	return out, nil
+	return readStateDBEvents(ctx, db, dbPath, fi.ModTime().UTC(), 0)
 }
+
 func composerEventsFromRecords(records []cursorComposerSessionRecord, dbPath string) []shared.TelemetryEvent {
 	var out []shared.TelemetryEvent
 	for _, record := range records {
@@ -408,7 +434,7 @@ func appendCursorDedupEvents(
 }
 
 // cursorTableExists checks whether a table exists in a SQLite database.
-func cursorTableExists(ctx context.Context, db *sql.DB, table string) bool {
+func cursorTableExists(ctx context.Context, db sqlQueryer, table string) bool {
 	var exists int
 	err := db.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`, strings.TrimSpace(table)).Scan(&exists)
 	return err == nil && exists == 1
@@ -546,7 +572,7 @@ func bubbleTokenEventsFromRecords(records []cursorBubbleRecord, sessionTimestamp
 // collectDailyStatsEvents extracts daily code tracking stats from ItemTable.
 // Keys like "aiCodeTracking.dailyStats.v1.5.2025-11-23" contain tab/composer
 // suggested/accepted line counts per day.
-func collectDailyStatsEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
+func collectDailyStatsEvents(ctx context.Context, db sqlQueryer, dbPath string) ([]shared.TelemetryEvent, error) {
 	records, err := loadDailyStatsRecords(ctx, db)
 	if err != nil {
 		return nil, err

@@ -118,11 +118,17 @@ func mergeCodexSessionBreakdown(dst, src *core.UsageSnapshot) {
 
 	for key, metric := range src.Metrics {
 		if _, exists := dst.Metrics[key]; !exists {
+			if strings.HasPrefix(key, "rate_limit_") && (dst.Raw["rate_limit_source"] == "live" || dst.Raw["rate_limit_source"] == "cli_rpc") {
+				continue
+			}
 			dst.Metrics[key] = metric
 		}
 	}
 	for key, reset := range src.Resets {
 		if _, exists := dst.Resets[key]; !exists {
+			if strings.HasPrefix(key, "rate_limit_") && (dst.Raw["rate_limit_source"] == "live" || dst.Raw["rate_limit_source"] == "cli_rpc") {
+				continue
+			}
 			dst.Resets[key] = reset
 		}
 	}
@@ -138,6 +144,9 @@ func mergeCodexSessionBreakdown(dst, src *core.UsageSnapshot) {
 	}
 	for key, value := range src.Raw {
 		if _, exists := dst.Raw[key]; !exists {
+			if strings.HasPrefix(key, "rate_limit_") && (dst.Raw["rate_limit_source"] == "live" || dst.Raw["rate_limit_source"] == "cli_rpc") {
+				continue
+			}
 			dst.Raw[key] = value
 		}
 	}
@@ -173,24 +182,38 @@ func mergeCodexDailyCreditSnapshot(dst, src *core.UsageSnapshot) {
 	}
 }
 
-// mergeCodexQuotaSnapshot copies only fields produced by a remote quota
-// source. Live data wins when present; the CLI result fills gaps such as an
-// individual credit limit or a rate-limit window omitted by the HTTP payload.
+// mergeCodexQuotaSnapshot copies quota fields from one source. Live data wins
+// for each reported pool; the CLI can supply other pools and credit details.
 func mergeCodexQuotaSnapshot(dst, src *core.UsageSnapshot, overwrite bool) {
 	if dst == nil || src == nil {
 		return
 	}
 	ensureCodexSnapshotMaps(dst)
 
-	if overwrite && src.Raw["rate_limit_source"] == "live_unavailable" {
-		clearRateLimitMetrics(dst)
+	// Decide pool precedence before adding any slots: a source's missing
+	// window or reset must never be borrowed from another source.
+	existingPools := make(map[string]bool)
+	existingCreditMetrics := make(map[string]bool)
+	if !overwrite {
+		for key := range dst.Metrics {
+			if pool := codexRateLimitPool(key); pool != "" {
+				existingPools[pool] = true
+			}
+			if strings.HasPrefix(key, "codex_credit_") {
+				existingCreditMetrics[key] = true
+			}
+		}
 	}
 	for key, metric := range src.Metrics {
 		if !isCodexQuotaMetric(key) {
 			continue
 		}
+		if pool := codexRateLimitPool(key); pool != "" && existingPools[pool] {
+			continue
+		}
 		if overwrite {
 			dst.Metrics[key] = metric
+			delete(dst.Resets, key)
 			continue
 		}
 		if _, exists := dst.Metrics[key]; !exists {
@@ -199,6 +222,17 @@ func mergeCodexQuotaSnapshot(dst, src *core.UsageSnapshot, overwrite bool) {
 	}
 	for key, reset := range src.Resets {
 		if !isCodexQuotaMetric(key) {
+			continue
+		}
+		if pool := codexRateLimitPool(key); pool != "" {
+			if existingPools[pool] {
+				continue
+			}
+			if _, ok := src.Metrics[key]; !ok {
+				continue
+			}
+		}
+		if strings.HasPrefix(key, "codex_credit_") && existingCreditMetrics[key] {
 			continue
 		}
 		if overwrite {
@@ -211,6 +245,25 @@ func mergeCodexQuotaSnapshot(dst, src *core.UsageSnapshot, overwrite bool) {
 	}
 
 	for key, value := range src.Raw {
+		if strings.HasPrefix(key, "rate_limit_") && strings.HasSuffix(key, "_name") {
+			pool := strings.TrimSuffix(key, "name")
+			if !existingPools[pool] {
+				dst.Raw[key] = value
+			}
+			continue
+		}
+		if strings.HasSuffix(key, "_bucket") {
+			metricKey := strings.TrimSuffix(key, "_bucket")
+			pool := codexRateLimitPool(metricKey)
+			if pool == "" || existingPools[pool] {
+				continue
+			}
+			if _, ok := src.Metrics[metricKey]; !ok {
+				continue
+			}
+			dst.Raw[key] = value
+			continue
+		}
 		if !isCodexQuotaRawKey(key) {
 			continue
 		}
@@ -224,6 +277,18 @@ func mergeCodexQuotaSnapshot(dst, src *core.UsageSnapshot, overwrite bool) {
 			dst.Raw["rate_limit_source"] = "cli_rpc"
 		}
 	}
+}
+
+func codexRateLimitPool(key string) string {
+	if !strings.HasPrefix(key, "rate_limit_") {
+		return ""
+	}
+	for _, suffix := range []string{"primary", "secondary"} {
+		if strings.HasSuffix(key, "_"+suffix) {
+			return strings.TrimSuffix(key, suffix)
+		}
+	}
+	return ""
 }
 
 func isCodexQuotaMetric(key string) bool {

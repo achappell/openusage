@@ -71,6 +71,18 @@ type Resolver struct {
 	// price the same few models on every Fetch.
 	lookupCache           map[lookupCacheKey]*Price
 	lookupCacheValidUntil time.Time
+
+	// generation identifies cached prices for callers that memoise costs.
+	generation uint64
+}
+
+// Generation reports a change when pricing tables are stored or expire, so
+// callers cannot keep using memoised costs past the resolver's freshness window.
+func (r *Resolver) Generation() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.expireLookupCache()
+	return r.generation
 }
 
 type lookupCacheKey struct {
@@ -157,9 +169,7 @@ func (r *Resolver) Lookup(ctx context.Context, model string, contextLen int) (*P
 
 	key := lookupCacheKey{model: model, contextLen: contextLen}
 	r.mu.Lock()
-	if r.lookupCache != nil && !r.clock().Before(r.lookupCacheValidUntil) {
-		r.lookupCache = nil
-	}
+	r.expireLookupCache()
 	if cached, ok := r.lookupCache[key]; ok {
 		r.mu.Unlock()
 		if cached == nil {
@@ -174,7 +184,14 @@ func (r *Resolver) Lookup(ctx context.Context, model string, contextLen int) (*P
 	r.mu.Lock()
 	if r.lookupCache == nil {
 		r.lookupCache = make(map[lookupCacheKey]*Price, 16)
-		r.lookupCacheValidUntil = r.clock().Add(r.tableTTL())
+		now := r.clock()
+		r.lookupCacheValidUntil = now.Add(r.tableTTL())
+		if r.liteLLMLoaded && r.liteLLMValidUntil.After(now) && r.liteLLMValidUntil.Before(r.lookupCacheValidUntil) {
+			r.lookupCacheValidUntil = r.liteLLMValidUntil
+		}
+		if r.openRouterDone && r.openRouterValidUntil.After(now) && r.openRouterValidUntil.Before(r.lookupCacheValidUntil) {
+			r.lookupCacheValidUntil = r.openRouterValidUntil
+		}
 	}
 	r.lookupCache[key] = result
 	r.mu.Unlock()
@@ -183,6 +200,14 @@ func (r *Resolver) Lookup(ctx context.Context, model string, contextLen int) (*P
 		return nil, err
 	}
 	return result, nil
+}
+
+// expireLookupCache is called under mu by both Lookup and Generation.
+func (r *Resolver) expireLookupCache() {
+	if r.lookupCache != nil && !r.clock().Before(r.lookupCacheValidUntil) {
+		r.lookupCache = nil
+		r.generation++
+	}
 }
 
 // clock returns the resolver's current time, tolerating a zero-value
@@ -349,6 +374,7 @@ func (r *Resolver) storeLiteLLM(t map[string]Price, mtime, validUntil time.Time)
 	r.liteLLMValidUntil = validUntil
 	r.liteLLMKeysCache = nil
 	r.lookupCache = nil
+	r.generation++
 	if !mtime.IsZero() {
 		for k, p := range t {
 			p.LastUpdated = mtime
@@ -365,6 +391,7 @@ func (r *Resolver) storeOpenRouter(t map[string]Price, mtime, validUntil time.Ti
 	r.openRouterValidUntil = validUntil
 	r.openRouterKeysCache = nil
 	r.lookupCache = nil
+	r.generation++
 	if !mtime.IsZero() {
 		for k, p := range t {
 			p.LastUpdated = mtime

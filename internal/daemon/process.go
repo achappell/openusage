@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/mod/semver"
@@ -43,20 +46,215 @@ func ClassifyEnsureError(err error) DaemonState {
 	}
 }
 
-func EnsureRunning(ctx context.Context, socketPath string, verbose bool) (*Client, error) {
+// EnsureRunning returns a client for a healthy telemetry daemon, installing,
+// starting, or upgrading the background service when needed.
+//
+// The returned warning is non-empty when the dashboard should keep going in a
+// degraded state: the daemon on the socket is reachable and speaks a
+// compatible API, but is not the build this binary expects and could not (or
+// should not) be replaced automatically. Callers must treat a non-nil client
+// as usable even when warning is set.
+func EnsureRunning(ctx context.Context, socketPath string, verbose bool) (*Client, string, error) {
 	socketPath = strings.TrimSpace(socketPath)
 	if socketPath == "" {
-		return nil, fmt.Errorf("daemon socket path is empty")
+		return nil, "", fmt.Errorf("daemon socket path is empty")
 	}
 	client := NewClient(socketPath)
 
 	health, healthErr := WaitForHealthInfo(ctx, client, 1200*time.Millisecond)
 	if healthErr == nil && HealthCurrent(health) {
-		return client, nil
+		return client, "", nil
 	}
 
-	needsUpgrade := healthErr == nil
-	return ensureViaServiceManager(ctx, client, socketPath, verbose, needsUpgrade, health)
+	if healthErr != nil {
+		c, err := ensureViaServiceManager(ctx, client, socketPath, verbose, false, health)
+		return c, "", err
+	}
+
+	// A daemon is answering but it is not the build we expect.
+	if allowed, reason := autoUpgradeAllowed(health); !allowed {
+		if HealthAPICompatible(health) {
+			return client, reason, nil
+		}
+		return nil, "", fmt.Errorf("%s", reason)
+	}
+
+	c, err := ensureViaServiceManager(ctx, client, socketPath, verbose, true, health)
+	if err == nil {
+		return c, "", nil
+	}
+	// The upgrade failed. If a compatible daemon still answers, keep the
+	// dashboard usable instead of parking it on the startup screen.
+	if fallback, warning, ok := degradeToRunningDaemon(ctx, client, err); ok {
+		return fallback, warning, nil
+	}
+	return nil, "", err
+}
+
+// autoUpgradeCooldown is the minimum time between two automatic service
+// reinstalls from one dashboard process. If the daemon is replaced again
+// within the window, something else (typically an older openusage still
+// running in another terminal) reinstalled its own build, and fighting it
+// only produces a restart loop that re-ingests history on every start.
+const autoUpgradeCooldown = 30 * time.Minute
+
+var (
+	autoUpgradeMu   sync.Mutex
+	autoUpgradeLast time.Time
+	autoUpgradeNow  = time.Now
+)
+
+// markAutoUpgradeAttempted records a reinstall attempt and reports whether one
+// is allowed now, i.e. no attempt happened within autoUpgradeCooldown.
+func markAutoUpgradeAttempted() bool {
+	autoUpgradeMu.Lock()
+	defer autoUpgradeMu.Unlock()
+	now := autoUpgradeNow()
+	if !autoUpgradeLast.IsZero() && now.Sub(autoUpgradeLast) < autoUpgradeCooldown {
+		return false
+	}
+	autoUpgradeLast = now
+	return true
+}
+
+func resetAutoUpgradeForTest() {
+	autoUpgradeMu.Lock()
+	autoUpgradeLast = time.Time{}
+	autoUpgradeNow = time.Now
+	autoUpgradeMu.Unlock()
+}
+
+// autoUpgradeAllowed decides whether this binary may replace the running
+// daemon service without an explicit user action. When it returns false the
+// string is the reason, shown to the user as a status-line hint (or as the
+// error when the daemon is unusable). An empty reason with false means the
+// running daemon is fine as is.
+//
+// Policy, while the daemon speaks a compatible API:
+//   - reinstall only when both builds are releases and ours is strictly newer;
+//   - never downgrade a newer daemon;
+//   - equal versions are a no-op;
+//   - dev, `git describe`, or dirty builds on either side never replace a
+//     healthy daemon; the user runs `openusage telemetry daemon install`.
+//
+// An API-incompatible daemon is unusable, so it is replaced unless that would
+// be a downgrade. Every reinstall is debounced by autoUpgradeCooldown.
+func autoUpgradeAllowed(health HealthResponse) (bool, string) {
+	ours := strings.TrimSpace(version.Version)
+	running := HealthVersion(health)
+	hint := fmt.Sprintf(
+		"Background helper is %s, this openusage is %s; run `openusage telemetry daemon install` to switch",
+		running, displayVersion(ours),
+	)
+	apiCompatible := HealthAPICompatible(health)
+	cmp, comparable := compareBuildVersions(ours, running)
+
+	if comparable && cmp < 0 {
+		if apiCompatible {
+			return false, hint + " (not downgrading automatically)"
+		}
+		return false, fmt.Sprintf(
+			"telemetry daemon %s is newer than this openusage (%s) and speaks an incompatible API; upgrade openusage",
+			running, displayVersion(ours),
+		)
+	}
+
+	if apiCompatible {
+		bothReleases := IsReleaseSemver(normalizeVersion(ours)) && IsReleaseSemver(normalizeVersion(running))
+		switch {
+		case comparable && cmp == 0:
+			return false, ""
+		case !bothReleases:
+			return false, hint
+		}
+	}
+
+	if !markAutoUpgradeAttempted() {
+		if !apiCompatible {
+			return false, "telemetry daemon is out of date (API incompatible) and another openusage process keeps reinstalling it; " + hint
+		}
+		return false, hint + " (another openusage process keeps reinstalling it)"
+	}
+	return true, ""
+}
+
+func degradeToRunningDaemon(ctx context.Context, client *Client, upgradeErr error) (*Client, string, bool) {
+	// The ensure context may already be spent by the failed install; probe
+	// with a short budget of our own.
+	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	health, err := WaitForHealthInfo(probeCtx, client, 3*time.Second)
+	if err != nil || !HealthAPICompatible(health) {
+		return nil, "", false
+	}
+	first := upgradeErr.Error()
+	if idx := strings.IndexByte(first, '\n'); idx >= 0 {
+		first = first[:idx]
+	}
+	return client, fmt.Sprintf(
+		"Background helper update failed, using running %s: %s",
+		HealthVersion(health), first,
+	), true
+}
+
+func displayVersion(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "dev"
+	}
+	return v
+}
+
+type buildVersion struct {
+	base    string // canonical semver, e.g. v0.25.1
+	commits int    // commits past base from `git describe` (0 for releases)
+}
+
+var gitDescribeSuffix = regexp.MustCompile(`^(v[0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)-g[0-9a-f]+(-dirty)?$`)
+
+func normalizeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v != "" && !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
+}
+
+// parseBuildVersion understands release versions (0.25.1, v0.25.1) and
+// `git describe` versions produced by `make build` (v0.25.1-6-g611051b[-dirty]).
+// It returns nil for anything else ("dev", "unknown", empty).
+func parseBuildVersion(raw string) *buildVersion {
+	v := normalizeVersion(raw)
+	if m := gitDescribeSuffix.FindStringSubmatch(v); m != nil {
+		n, err := strconv.Atoi(m[2])
+		if err != nil || !semver.IsValid(m[1]) {
+			return nil
+		}
+		return &buildVersion{base: semver.Canonical(m[1]), commits: n}
+	}
+	v = strings.TrimSuffix(v, "-dirty")
+	if !semver.IsValid(v) {
+		return nil
+	}
+	return &buildVersion{base: v}
+}
+
+// compareBuildVersions compares two build versions. ok is false when either
+// side is not a recognisable version.
+func compareBuildVersions(a, b string) (int, bool) {
+	va, vb := parseBuildVersion(a), parseBuildVersion(b)
+	if va == nil || vb == nil {
+		return 0, false
+	}
+	if c := semver.Compare(va.base, vb.base); c != 0 {
+		return c, true
+	}
+	switch {
+	case va.commits < vb.commits:
+		return -1, true
+	case va.commits > vb.commits:
+		return 1, true
+	}
+	return 0, true
 }
 
 func ensureViaServiceManager(

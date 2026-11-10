@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,10 +31,23 @@ const (
 	ttlVersion          = 1 * time.Hour
 	ttlAuthStatus       = 5 * time.Minute
 	ttlSnapshot         = 2 * time.Minute
+
+	// Failures are cached too, for less time, so a missing `gh copilot`
+	// extension or a failing account does not re-run every subprocess on
+	// every poll.
+	ttlVersionFailure  = 10 * time.Minute
+	ttlSnapshotFailure = 1 * time.Minute
+
+	// Org billing and metrics change slowly and cost two `gh api` calls per
+	// org; with many orgs they alone used to exceed the daemon's fetch
+	// timeout. Failures (403 for non-admins is the common case) are cached
+	// for the same hour.
+	ttlOrgData = 1 * time.Hour
 )
 
 // copilotAPICache holds cached results from CLI subprocess calls and API
-// responses.  All fields are protected by Provider.cacheMu.
+// responses for a single account/host pair (see accountCacheKey).  All fields
+// are protected by Provider.cacheMu.
 type copilotAPICache struct {
 	// Binary resolution (1 hour TTL)
 	ghBinary         string
@@ -43,6 +57,7 @@ type copilotAPICache struct {
 	// Version detection (1 hour TTL)
 	version          string
 	versionSource    string
+	versionErr       string
 	versionFetchedAt time.Time
 
 	// Auth status (5 min TTL)
@@ -53,13 +68,47 @@ type copilotAPICache struct {
 	// Full snapshot cache for quick return (2 min TTL)
 	lastSnap   core.UsageSnapshot
 	lastSnapAt time.Time
+
+	// Org endpoint responses keyed by endpoint path (1 hour TTL).
+	orgResponses map[string]cachedAPIResponse
+}
+
+// cachedAPIResponse is a cached `gh api` result; err is non-empty when the
+// call failed.
+type cachedAPIResponse struct {
+	body      string
+	err       string
+	fetchedAt time.Time
 }
 
 type Provider struct {
 	providerbase.Base
 
-	cacheMu  sync.Mutex
-	apiCache *copilotAPICache
+	cacheMu sync.Mutex
+	// apiCaches is keyed by accountCacheKey so that accounts pointing at
+	// different GitHub hosts (github.com vs a GHE instance) never share
+	// cached auth status or snapshots.
+	apiCaches map[string]*copilotAPICache
+}
+
+// accountCacheKey identifies the cache bucket for an account: its ID plus the
+// GitHub host it talks to.
+func accountCacheKey(acct core.AccountConfig) string {
+	return acct.ID + "\x00" + ghHostnameFromBaseURL(acct.BaseURL)
+}
+
+// cacheLocked returns the cache bucket for key, creating it if needed.
+// Callers must hold p.cacheMu.
+func (p *Provider) cacheLocked(key string) *copilotAPICache {
+	if p.apiCaches == nil {
+		p.apiCaches = make(map[string]*copilotAPICache)
+	}
+	c, ok := p.apiCaches[key]
+	if !ok {
+		c = &copilotAPICache{}
+		p.apiCaches[key] = c
+	}
+	return c
 }
 
 func New() *Provider {
@@ -297,10 +346,12 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	cacheKey := accountCacheKey(acct)
+
 	// Fast path: return cached snapshot if still fresh and successful.
 	p.cacheMu.Lock()
-	if p.apiCache != nil && time.Since(p.apiCache.lastSnapAt) < ttlSnapshot && p.apiCache.lastSnap.Status == core.StatusOK {
-		snap := p.apiCache.lastSnap
+	if c := p.cacheLocked(cacheKey); !c.lastSnapAt.IsZero() && time.Since(c.lastSnapAt) < snapshotTTL(c.lastSnap.Status) {
+		snap := c.lastSnap
 		p.cacheMu.Unlock()
 		return snap, nil
 	}
@@ -327,21 +378,25 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		DailySeries: make(map[string][]core.TimePoint),
 	}
 
-	version, versionSource, err := p.detectAndCacheVersion(ctx, ghBinary, copilotBinary)
+	// Version detection (e.g. via the optional "gh copilot" extension) is
+	// informational only and must not block fetching real usage data: many
+	// setups (including GHE Cloud/Server) don't have that extension
+	// installed but still expose usage via the GitHub API.
+	version, versionSource, err := p.detectAndCacheVersion(ctx, cacheKey, ghBinary, copilotBinary)
 	if err != nil {
-		snap.Status = core.StatusError
-		snap.Message = "copilot command not available"
 		if errMsg := strings.TrimSpace(err.Error()); errMsg != "" {
 			snap.Raw["copilot_version_error"] = errMsg
 		}
-		return snap, nil
+	} else {
+		snap.Raw["copilot_version"] = version
+		snap.Raw["copilot_version_source"] = versionSource
 	}
-	snap.Raw["copilot_version"] = version
-	snap.Raw["copilot_version_source"] = versionSource
+
+	hostname := ghHostnameFromBaseURL(acct.BaseURL)
 
 	authOutput := ""
 	if ghBinary != "" {
-		authOut, authOK := p.checkAndCacheAuth(ctx, ghBinary)
+		authOut, authOK := p.checkAndCacheAuth(ctx, cacheKey, ghBinary, hostname)
 		authOutput = authOut
 		snap.Raw["auth_status"] = strings.TrimSpace(authOutput)
 
@@ -351,13 +406,13 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			return snap, nil
 		}
 
-		p.fetchUserInfo(ctx, ghBinary, &snap)
+		p.fetchUserInfo(ctx, ghBinary, hostname, &snap)
 
-		p.fetchCopilotInternalUser(ctx, ghBinary, &snap)
+		p.fetchCopilotInternalUser(ctx, ghBinary, hostname, &snap)
 
-		p.fetchRateLimits(ctx, ghBinary, &snap)
+		p.fetchRateLimits(ctx, ghBinary, hostname, &snap)
 
-		p.fetchOrgData(ctx, ghBinary, &snap)
+		p.fetchOrgData(ctx, cacheKey, ghBinary, hostname, &snap)
 	} else {
 		snap.Raw["auth_status"] = "gh CLI unavailable; skipped GitHub API checks"
 	}
@@ -366,18 +421,24 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	p.resolveStatus(&snap, authOutput)
 
-	// Cache successful snapshots for quick return on subsequent polls.
-	if snap.Status == core.StatusOK {
-		p.cacheMu.Lock()
-		if p.apiCache == nil {
-			p.apiCache = &copilotAPICache{}
-		}
-		p.apiCache.lastSnap = snap
-		p.apiCache.lastSnapAt = time.Now()
-		p.cacheMu.Unlock()
-	}
+	// Cache the snapshot for quick return on subsequent polls; non-OK
+	// snapshots get a shorter TTL (see snapshotTTL).
+	p.cacheMu.Lock()
+	c := p.cacheLocked(cacheKey)
+	c.lastSnap = snap
+	c.lastSnapAt = time.Now()
+	p.cacheMu.Unlock()
 
 	return snap, nil
+}
+
+// snapshotTTL is how long a snapshot with the given status is served from
+// cache.
+func snapshotTTL(status core.Status) time.Duration {
+	if status == core.StatusOK {
+		return ttlSnapshot
+	}
+	return ttlSnapshotFailure
 }
 
 // resolveAndCacheBinaries returns cached binary paths if the TTL has not expired,
@@ -386,8 +447,9 @@ func (p *Provider) resolveAndCacheBinaries(acct core.AccountConfig) (string, str
 	p.cacheMu.Lock()
 	defer p.cacheMu.Unlock()
 
-	if p.apiCache != nil && !p.apiCache.binaryResolvedAt.IsZero() && time.Since(p.apiCache.binaryResolvedAt) < ttlBinaryResolution {
-		return p.apiCache.ghBinary, p.apiCache.copilotBinary
+	c := p.cacheLocked(accountCacheKey(acct))
+	if !c.binaryResolvedAt.IsZero() && time.Since(c.binaryResolvedAt) < ttlBinaryResolution {
+		return c.ghBinary, c.copilotBinary
 	}
 
 	configuredBinary := strings.TrimSpace(acct.Binary)
@@ -396,64 +458,77 @@ func (p *Provider) resolveAndCacheBinaries(acct core.AccountConfig) (string, str
 	}
 	gh, copilot := resolveCopilotBinaries(configuredBinary, acct)
 
-	if p.apiCache == nil {
-		p.apiCache = &copilotAPICache{}
-	}
-	p.apiCache.ghBinary = gh
-	p.apiCache.copilotBinary = copilot
-	p.apiCache.binaryResolvedAt = time.Now()
+	c.ghBinary = gh
+	c.copilotBinary = copilot
+	c.binaryResolvedAt = time.Now()
 	return gh, copilot
 }
 
 // detectAndCacheVersion returns cached version info if the TTL has not expired,
 // otherwise runs the version command and caches the result.
-func (p *Provider) detectAndCacheVersion(ctx context.Context, ghBinary, copilotBinary string) (string, string, error) {
+func (p *Provider) detectAndCacheVersion(ctx context.Context, cacheKey, ghBinary, copilotBinary string) (string, string, error) {
 	p.cacheMu.Lock()
-	if p.apiCache != nil && p.apiCache.version != "" && time.Since(p.apiCache.versionFetchedAt) < ttlVersion {
-		v, src := p.apiCache.version, p.apiCache.versionSource
-		p.cacheMu.Unlock()
-		return v, src, nil
+	if c := p.cacheLocked(cacheKey); !c.versionFetchedAt.IsZero() {
+		age := time.Since(c.versionFetchedAt)
+		if c.versionErr == "" && age < ttlVersion {
+			v, src := c.version, c.versionSource
+			p.cacheMu.Unlock()
+			return v, src, nil
+		}
+		if c.versionErr != "" && age < ttlVersionFailure {
+			msg := c.versionErr
+			p.cacheMu.Unlock()
+			return "", "", errors.New(msg)
+		}
 	}
 	p.cacheMu.Unlock()
 
 	version, source, err := detectCopilotVersion(ctx, ghBinary, copilotBinary)
-	if err != nil {
+	if err != nil && ctx.Err() != nil {
+		// Cancelled mid-probe: that says nothing about the extension.
 		return "", "", err
 	}
 
 	p.cacheMu.Lock()
-	if p.apiCache == nil {
-		p.apiCache = &copilotAPICache{}
+	c := p.cacheLocked(cacheKey)
+	c.version = version
+	c.versionSource = source
+	c.versionErr = ""
+	if err != nil {
+		c.versionErr = err.Error()
 	}
-	p.apiCache.version = version
-	p.apiCache.versionSource = source
-	p.apiCache.versionFetchedAt = time.Now()
+	c.versionFetchedAt = time.Now()
 	p.cacheMu.Unlock()
 
+	if err != nil {
+		return "", "", err
+	}
 	return version, source, nil
 }
 
 // checkAndCacheAuth returns cached auth status if the TTL has not expired,
 // otherwise runs `gh auth status` and caches the result.
-func (p *Provider) checkAndCacheAuth(ctx context.Context, ghBinary string) (string, bool) {
+func (p *Provider) checkAndCacheAuth(ctx context.Context, cacheKey, ghBinary, hostname string) (string, bool) {
 	p.cacheMu.Lock()
-	if p.apiCache != nil && !p.apiCache.authFetchedAt.IsZero() && time.Since(p.apiCache.authFetchedAt) < ttlAuthStatus {
-		out, ok := p.apiCache.authOutput, p.apiCache.authOK
+	if c := p.cacheLocked(cacheKey); !c.authFetchedAt.IsZero() && time.Since(c.authFetchedAt) < ttlAuthStatus {
+		out, ok := c.authOutput, c.authOK
 		p.cacheMu.Unlock()
 		return out, ok
 	}
 	p.cacheMu.Unlock()
 
-	authOut, authErr := runGH(ctx, ghBinary, "auth", "status")
+	args := []string{"auth", "status"}
+	if hostname != "" {
+		args = append(args, "--hostname", hostname)
+	}
+	authOut, authErr := runGH(ctx, ghBinary, args...)
 	authOK := authErr == nil
 
 	p.cacheMu.Lock()
-	if p.apiCache == nil {
-		p.apiCache = &copilotAPICache{}
-	}
-	p.apiCache.authOutput = authOut
-	p.apiCache.authOK = authOK
-	p.apiCache.authFetchedAt = time.Now()
+	c := p.cacheLocked(cacheKey)
+	c.authOutput = authOut
+	c.authOK = authOK
+	c.authFetchedAt = time.Now()
 	p.cacheMu.Unlock()
 
 	return authOut, authOK
@@ -481,6 +556,31 @@ func resolveCopilotBinaries(configuredBinary string, acct core.AccountConfig) (s
 	}
 
 	return ghBinary, copilotBinary
+}
+
+// ghHostnameFromBaseURL extracts the GitHub host (for `gh --hostname`) from an
+// account's configured BaseURL, so GitHub Enterprise Cloud/Server accounts
+// (e.g. "https://my-company.ghe.com") work without hardcoding any hostname.
+// Returns "" for github.com or an unset BaseURL, meaning gh's default host
+// should be used.
+func ghHostnameFromBaseURL(baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return ""
+	}
+	host := baseURL
+	if idx := strings.Index(host, "://"); idx >= 0 {
+		host = host[idx+3:]
+	}
+	host = strings.TrimPrefix(host, "api.")
+	if idx := strings.IndexAny(host, "/:"); idx >= 0 {
+		host = host[:idx]
+	}
+	host = strings.TrimSpace(host)
+	if host == "" || host == "github.com" {
+		return ""
+	}
+	return host
 }
 
 func isGHCliBinary(binary string) bool {
