@@ -25,6 +25,18 @@
 
 **Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.2...v0.26.3
 
+## 0.28.0 (2026-11-10)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* Sync upstream main and reconcile Claude quota refresh by @achappell in https://github.com/achappell/openusage/pull/28
+* Fix Claude quota refresh and freshness by @achappell in https://github.com/achappell/openusage/pull/27
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.27.0...v0.28.0
+
 ## 0.26.3 (2026-11-01)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
