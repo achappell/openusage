@@ -143,16 +143,14 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 
 ### Optional Usage API (organization-wide)
 
-- Source: `GET https://claude.ai/api/organizations/{org_uuid}/usage` with session cookies imported via Settings → 5 KEYS. Returns aggregate per-day usage for the entire organization.
-- Transform: when available, the response is cached in memory and applied on top of the local data. Errors fall back to the cached response (if any) so transient failures don't blank the tile.
+- Source: the account-verified Claude Code OAuth or desktop-cookie usage API described below.
+- Transform: a successful response augments local data. If the remote request fails or the account cannot be verified, quota is unavailable rather than presented from cache as fresh.
 
 ### 5h / 7d utilization gauge (`usage_five_hour`, `usage_seven_day`)
 
-- Source (macOS): the Claude **desktop app's** session cookies, decrypted from the macOS keychain, are used to call the usage API above.
-- Source (fallback, all platforms): when desktop-app cookie extraction is unavailable — anywhere but macOS, or when the desktop app isn't installed — the provider reads the Claude Code CLI's own OAuth access token from `~/.claude/.credentials.json` and calls `GET https://api.anthropic.com/api/oauth/usage`. This needs no organization UUID (the token is account-scoped) and no desktop app, so the 5h/7d gauges work on Linux and Windows. An expired token is skipped (Claude Code refreshes it on next use).
-- Source selection: the provider tries the cookie source before OAuth, pins the first source that succeeds for later polls, and clears that pin when the source fails so the next poll can probe both sources again. A cached response is used while the failed source is being recovered.
-- Transform: the response (same `five_hour` / `seven_day` utilization shape from either source) populates the gauges and warms the shared 5h cache read by the statusline and tmux segments.
-- Rate: a successful response is reused for 3 minutes, so the usage API is called at most once per 3 minutes however often the provider is polled. On HTTP 429 or 5xx the provider keeps the auth method that worked, serves the cached response, and backs off from 1 minute, doubling each time up to 30 minutes, or longer if `Retry-After` asks for it (also capped at 30 minutes). The desktop app's keychain key is looked up once per process, and each `security` lookup times out after 5 seconds.
+- Source: Claude Code CLI OAuth is used only when its local account identity matches the configured account. Desktop-cookie fallback verifies the authenticated account and organization before fetching quota with the same cookies. Accounts that cannot be verified are unavailable.
+- The provider makes bounded remote attempts and reports failures as unavailable rather than presenting cached values as fresh.
+- Transform: a successful response populates the gauges and records its observation time. The shared 5h cache is scoped to a verified account and expires at its original reset; rendering it cannot refresh its timestamp.
 
 ### Auth status
 

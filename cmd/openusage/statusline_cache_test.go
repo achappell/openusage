@@ -52,6 +52,7 @@ func setupStatuslineCacheTest(t *testing.T) (transcript string, calls *int) {
 func TestStatuslineCache_HitServesIdenticalBytes(t *testing.T) {
 	transcript, calls := setupStatuslineCacheTest(t)
 	opts := defaultStatuslineOptions()
+	opts.segments = []string{"model"}
 
 	first := runStatuslineOnce(t, opts, statuslineStdin(t, "sess-1", transcript))
 	// The stdin duration field changes between calls; it must not bust the cache.
@@ -68,6 +69,7 @@ func TestStatuslineCache_HitServesIdenticalBytes(t *testing.T) {
 func TestStatuslineCache_MissOnTranscriptChange(t *testing.T) {
 	transcript, calls := setupStatuslineCacheTest(t)
 	opts := defaultStatuslineOptions()
+	opts.segments = []string{"model"}
 
 	runStatuslineOnce(t, opts, statuslineStdin(t, "sess-1", transcript))
 	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0)
@@ -89,6 +91,7 @@ func TestStatuslineCache_MissOnTranscriptChange(t *testing.T) {
 func TestStatuslineCache_MissOnExpiry(t *testing.T) {
 	transcript, calls := setupStatuslineCacheTest(t)
 	opts := defaultStatuslineOptions()
+	opts.segments = []string{"model"}
 
 	runStatuslineOnce(t, opts, statuslineStdin(t, "sess-1", transcript))
 	path := statuslineCachePath("sess-1")
@@ -105,6 +108,7 @@ func TestStatuslineCache_MissOnExpiry(t *testing.T) {
 func TestStatuslineCache_MissOnOptionsOrSession(t *testing.T) {
 	transcript, calls := setupStatuslineCacheTest(t)
 	opts := defaultStatuslineOptions()
+	opts.segments = []string{"model"}
 
 	runStatuslineOnce(t, opts, statuslineStdin(t, "sess-1", transcript))
 
@@ -130,9 +134,38 @@ func TestStatuslineCache_CorruptFileFallsBackToRender(t *testing.T) {
 	if err := os.WriteFile(path, []byte("garbage-without-newline"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out := runStatuslineOnce(t, defaultStatuslineOptions(), statuslineStdin(t, "sess-1", transcript))
+	opts := defaultStatuslineOptions()
+	opts.segments = []string{"model"}
+	out := runStatuslineOnce(t, opts, statuslineStdin(t, "sess-1", transcript))
 	if *calls != 1 || out != "render#1 sess-1\n" {
 		t.Fatalf("corrupt cache should fall back to a render: renders=%d out=%q", *calls, out)
+	}
+}
+
+func TestStatuslineCache_QuotaAlwaysRendersFresh(t *testing.T) {
+	home := isolateHome(t)
+	opts := defaultStatuslineOptions()
+	stdin := statuslineStdin(t, "sess-1", filepath.Join(home, "session.jsonl"))
+	in := readStatuslineInput(strings.NewReader(stdin))
+	writeStatuslineCache(in.SessionID, statuslineCacheKey(in, opts), "stale quota")
+
+	orig := statuslineRender
+	renders := []string{"account A 20%", "account B 50%", "quota expired", "daemon failure"}
+	calls := 0
+	statuslineRender = func(_ statuslineInput, _ statuslineOptions) string {
+		result := renders[calls]
+		calls++
+		return result
+	}
+	t.Cleanup(func() { statuslineRender = orig })
+
+	for _, want := range renders {
+		if got := runStatuslineOnce(t, opts, stdin); got != want+"\n" {
+			t.Fatalf("quota render: got %q, want %q", got, want+"\n")
+		}
+	}
+	if calls != len(renders) {
+		t.Fatalf("expected %d fresh renders, got %d", len(renders), calls)
 	}
 }
 

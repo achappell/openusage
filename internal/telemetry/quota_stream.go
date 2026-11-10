@@ -64,14 +64,19 @@ func BuildLimitSnapshotRequests(snaps map[string]core.UsageSnapshot) []IngestReq
 		if occurredAt.IsZero() {
 			occurredAt = time.Now().UTC()
 		}
+		if providerID == "claude_code" {
+			if observedAt, err := time.Parse(time.RFC3339Nano, snap.Attributes["usage_api_observed_at"]); err == nil {
+				occurredAt = observedAt.UTC()
+			}
+		}
 
-		// Stable per provider/account/timestamp-second snapshot ID.
-		turnID := fmt.Sprintf(
-			"snapshot:%s:%s:%s",
-			providerID,
-			effectiveAccountID,
-			occurredAt.Truncate(time.Second).Format(time.RFC3339),
-		)
+		// Keep existing IDs for other providers. Claude may produce multiple
+		// distinct observations within a second, including a failure after success.
+		turnTime := occurredAt.Truncate(time.Second).Format(time.RFC3339)
+		if providerID == "claude_code" {
+			turnTime = occurredAt.Format(time.RFC3339Nano)
+		}
+		turnID := fmt.Sprintf("snapshot:%s:%s:%s", providerID, effectiveAccountID, turnTime)
 
 		out = append(out, IngestRequest{
 			SourceSystem:        SourceSystemPoller,

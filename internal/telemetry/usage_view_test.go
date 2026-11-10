@@ -13,6 +13,20 @@ import (
 
 func float64Ptr(v float64) *float64 { return &v }
 
+func TestUsageProjectionPreservesQuotaProvenance(t *testing.T) {
+	snap := core.UsageSnapshot{
+		Attributes:  map[string]string{"usage_api_observed_at": "2026-11-10T04:00:00Z", "usage_old": "discard"},
+		Diagnostics: map[string]string{"usage_api_error": "unavailable", "usage_old": "discard"},
+	}
+	applyUsageViewToSnapshot(&snap, newTelemetryUsageAgg(), "30d")
+	if snap.Attributes["usage_api_observed_at"] != "2026-11-10T04:00:00Z" || snap.Diagnostics["usage_api_error"] != "unavailable" {
+		t.Fatal("quota observation provenance was stripped")
+	}
+	if _, ok := snap.Attributes["usage_old"]; ok {
+		t.Fatal("stale telemetry metadata retained")
+	}
+}
+
 func TestValidateMaterializedTable(t *testing.T) {
 	tests := []struct {
 		name    string

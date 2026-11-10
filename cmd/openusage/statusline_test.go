@@ -7,8 +7,47 @@ import (
 	"testing"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/report"
 )
+
+func TestFiveHourFromSnapshotsRequiresFreshUnambiguousAccount(t *testing.T) {
+	now := time.Date(2026, 11, 10, 4, 0, 0, 0, time.UTC)
+	s := core.UsageSnapshot{
+		ProviderID: "claude_code", AccountID: "a", Status: core.StatusOK,
+		Attributes: map[string]string{"usage_api_observed_at": now.Format(time.RFC3339Nano)},
+		Metrics:    map[string]core.Metric{"usage_five_hour": {Used: new(100.0)}},
+		Resets:     map[string]time.Time{"usage_five_hour": now.Add(time.Hour)},
+	}
+	if v, ok := fiveHourFromSnapshots([]core.UsageSnapshot{s}, now); !ok || v != 100 {
+		t.Fatal("fresh quota missing")
+	}
+	if _, ok := fiveHourFromSnapshots([]core.UsageSnapshot{s, s}, now); ok {
+		t.Fatal("ambiguous account accepted")
+	}
+	s.Status = core.StatusError
+	if _, ok := fiveHourFromSnapshots([]core.UsageSnapshot{s}, now); ok {
+		t.Fatal("failed quota accepted")
+	}
+	s.Status = core.StatusOK
+	if _, ok := fiveHourFromSnapshots([]core.UsageSnapshot{s}, now.Add(11*time.Minute)); ok {
+		t.Fatal("stale quota accepted")
+	}
+	s.AccountID = ""
+	if _, ok := fiveHourFromSnapshots([]core.UsageSnapshot{s}, now); ok {
+		t.Fatal("quota without account identity accepted")
+	}
+	s.AccountID = "a"
+	s.Resets["usage_five_hour"] = now
+	if _, ok := fiveHourFromSnapshots([]core.UsageSnapshot{s}, now); ok {
+		t.Fatal("expired quota accepted")
+	}
+	s.Resets["usage_five_hour"] = now.Add(time.Hour)
+	s.Attributes["usage_api_observed_at"] = now.Add(time.Second).Format(time.RFC3339Nano)
+	if _, ok := fiveHourFromSnapshots([]core.UsageSnapshot{s}, now); ok {
+		t.Fatal("future quota observation accepted")
+	}
+}
 
 func TestRenderStatusline_FullLine(t *testing.T) {
 	now := time.Date(2026, 6, 1, 13, 0, 0, 0, time.Local)

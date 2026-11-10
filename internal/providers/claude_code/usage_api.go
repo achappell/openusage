@@ -44,11 +44,6 @@ func getClaudeSessionCookies() (map[string]string, error) {
 		return nil, fmt.Errorf("cookie extraction only supported on macOS")
 	}
 
-	encKey, err := getChromiumEncryptionKey()
-	if err != nil {
-		return nil, fmt.Errorf("getting encryption key: %w", err)
-	}
-
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolving home directory: %w", err)
@@ -56,6 +51,10 @@ func getClaudeSessionCookies() (map[string]string, error) {
 	cookiesPath := filepath.Join(home, "Library", "Application Support", "Claude", "Cookies")
 	if _, err := os.Stat(cookiesPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("Claude desktop Cookies DB not found: %s", cookiesPath)
+	}
+	encKey, err := getChromiumEncryptionKey()
+	if err != nil {
+		return nil, fmt.Errorf("getting encryption key: %w", err)
 	}
 
 	tmpFile, err := os.CreateTemp("", "claude-cookies-*.db")
@@ -261,22 +260,20 @@ func fetchUsageAPIWithAuth(ctx context.Context, url string, setAuth func(*http.R
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, &usageAPIStatusError{
 			Code:       resp.StatusCode,
-			Body:       string(body),
 			RetryAfter: parseRetryAfterSeconds(resp.Header.Get("Retry-After")),
 		}
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
 	var usage usageResponse
 	if err := json.Unmarshal(body, &usage); err != nil {
-		return nil, fmt.Errorf("parsing response: %w", err)
+		return nil, fmt.Errorf("parsing usage response failed")
 	}
 
 	return &usage, nil
@@ -286,12 +283,11 @@ func fetchUsageAPIWithAuth(ctx context.Context, url string, setAuth func(*http.R
 // whether it is a 429/5xx, which means "back off", not "this auth is broken".
 type usageAPIStatusError struct {
 	Code       int
-	Body       string
 	RetryAfter time.Duration
 }
 
 func (e *usageAPIStatusError) Error() string {
-	return fmt.Sprintf("API returned %d: %s", e.Code, e.Body)
+	return fmt.Sprintf("API returned HTTP %d", e.Code)
 }
 
 func (e *usageAPIStatusError) Throttled() bool {
@@ -312,6 +308,58 @@ func parseRetryAfterSeconds(v string) time.Duration {
 		}
 	}
 	return 0
+}
+
+// cookieAccountURL identifies the user authenticated by the exact cookie
+// headers used for the subsequent organization-scoped quota request.
+var cookieAccountURL = "https://claude.ai/api/account"
+
+func verifyCookieIdentity(ctx context.Context, setAuth func(*http.Request), accountUUID, email, orgUUID string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cookieAccountURL, nil)
+	if err != nil {
+		return fmt.Errorf("creating account identity request failed")
+	}
+	setAuth(req)
+	client := &http.Client{
+		Timeout:       10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("account identity request failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return &usageAPIStatusError{Code: resp.StatusCode, RetryAfter: parseRetryAfterSeconds(resp.Header.Get("Retry-After"))}
+	}
+	var account struct {
+		UUID        string `json:"uuid"`
+		Email       string `json:"email_address"`
+		Memberships []struct {
+			Organization struct {
+				UUID string `json:"uuid"`
+			} `json:"organization"`
+		} `json:"memberships"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&account) != nil {
+		return fmt.Errorf("invalid account identity response")
+	}
+	if account.UUID != "" {
+		if accountUUID == "" || account.UUID != accountUUID {
+			return fmt.Errorf("cookie account identity does not match")
+		}
+	} else if email == "" || account.Email == "" || !strings.EqualFold(account.Email, email) {
+		return fmt.Errorf("cookie account identity does not match")
+	}
+	if email != "" && account.Email != "" && !strings.EqualFold(account.Email, email) {
+		return fmt.Errorf("cookie account identity does not match")
+	}
+	for _, membership := range account.Memberships {
+		if orgUUID != "" && membership.Organization.UUID == orgUUID {
+			return nil
+		}
+	}
+	return fmt.Errorf("cookie account organization does not match")
 }
 
 // oauthUsageURL is Anthropic's OAuth-scoped usage endpoint. It is a package

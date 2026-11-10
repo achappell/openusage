@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -27,6 +28,40 @@ func (s *Service) computeReadModel(
 	core.Tracef("[read_model_perf] computeReadModel TOTAL: %dms (window=%s, accounts=%d, results=%d)",
 		time.Since(start).Milliseconds(), tw, len(req.Accounts), len(result))
 	return result, err
+}
+
+// maskUnpersistedClaudeQuota hides older quota while an observation is pending
+// or the cached read model predates its successful ingest.
+// Cached read-model maps are immutable, so copy before replacing any entries.
+func (s *Service) maskUnpersistedClaudeQuota(snapshots map[string]core.UsageSnapshot, version uint64) map[string]core.UsageSnapshot {
+	s.pollStateMu.Lock()
+	defer s.pollStateMu.Unlock()
+	var masked map[string]core.UsageSnapshot
+	for accountID, snapshot := range snapshots {
+		state := s.pollState[accountID]
+		if snapshot.ProviderID != "claude_code" || state == nil || (!state.needsIngest && version >= state.ingestedVersion) {
+			continue
+		}
+		if masked == nil {
+			masked = maps.Clone(snapshots)
+		}
+		message := "Claude quota observation could not be persisted"
+		if !state.needsIngest {
+			message = "Claude quota read model is refreshing"
+		}
+		masked[accountID] = core.UsageSnapshot{
+			ProviderID:  snapshot.ProviderID,
+			AccountID:   snapshot.AccountID,
+			Timestamp:   snapshot.Timestamp,
+			Status:      core.StatusError,
+			Message:     message,
+			Diagnostics: map[string]string{"quota_ingest": "pending"},
+		}
+	}
+	if masked != nil {
+		return masked
+	}
+	return snapshots
 }
 
 func shouldRefreshCachedReadModel(cachedAt time.Time, cachedVersion, currentVersion uint64, now time.Time) bool {
@@ -55,7 +90,7 @@ func (s *Service) refreshReadModelCacheAsync(
 			return
 		}
 		s.rmCache.set(cacheKey, snapshots, refreshVersion)
-		s.pushToExporter(refreshCtx, snapshots)
+		s.pushToExporter(refreshCtx, s.maskUnpersistedClaudeQuota(snapshots, refreshVersion))
 	}()
 }
 

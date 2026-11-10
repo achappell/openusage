@@ -136,7 +136,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		for id, snap := range cached {
 			core.Tracef("[read_model]   %s: %d metrics", id, len(snap.Metrics))
 		}
-		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
+		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: s.maskUnpersistedClaudeQuota(cached, cachedVersion)})
 		// Refresh opportunistically only when the data version advanced after
 		// this entry was built. The staleness floor still debounces bursts.
 		if shouldRefreshCachedReadModel(cachedAt, cachedVersion, s.dataVersion.Load(), time.Now()) {
@@ -159,8 +159,8 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		}
 		timer.Stop()
 	}
-	if cached, _, _, ok := s.rmCache.get(cacheKey); ok {
-		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
+	if cached, _, cachedVersion, ok := s.rmCache.get(cacheKey); ok {
+		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: s.maskUnpersistedClaudeQuota(cached, cachedVersion)})
 		return
 	}
 
@@ -170,7 +170,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	// empty until the next ingest event.
 	s.markDataIngested()
 	snapshots := ReadModelTemplatesFromRequest(req, s.disabledAccounts())
-	writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots, Pending: true})
+	writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: s.maskUnpersistedClaudeQuota(snapshots, 0), Pending: true})
 	durationMs := time.Since(started).Milliseconds()
 	if durationMs >= 1200 && s.shouldLog("read_model_slow", 30*time.Second) {
 		s.infof(

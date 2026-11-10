@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Update Go and dependencies to fix reported security vulnerabilities.
+- Keep Claude quota observations account-bound and report failed refreshes as unavailable.
+
 ## Fork 0.27.0 (2026-09-21)
 
 - Sync fork main with upstream: https://github.com/achappell/openusage/pull/19

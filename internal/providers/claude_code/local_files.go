@@ -51,7 +51,7 @@ func applyUsageResponse(usage *usageResponse, snap *core.UsageSnapshot, now time
 		limit := float64(100)
 		if t, ok := parseReset(bucket.ResetsAt); ok {
 			if !t.After(now) {
-				util = 0
+				return
 			}
 			if resetKey != "" {
 				snap.Resets[resetKey] = t
@@ -292,6 +292,9 @@ func (p *Provider) readAccount(path string, snap *core.UsageSnapshot) error {
 	}
 
 	if acct.OAuthAccount != nil {
+		if acct.OAuthAccount.AccountUUID != "" {
+			snap.Raw["account_uuid"] = acct.OAuthAccount.AccountUUID
+		}
 		if acct.OAuthAccount.EmailAddress != "" {
 			snap.Raw["account_email"] = acct.OAuthAccount.EmailAddress
 		}

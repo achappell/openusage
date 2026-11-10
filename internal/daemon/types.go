@@ -194,6 +194,8 @@ type providerPollState struct {
 	lastFetchAt         time.Time
 	lastSnap            core.UsageSnapshot
 	creditLimitOverride *float64
+	needsIngest         bool
+	ingestedVersion     uint64
 	hasSnap             bool
 }
 

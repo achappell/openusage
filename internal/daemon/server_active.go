@@ -65,7 +65,7 @@ func (s *Service) computeActiveDetails(ctx context.Context) (activeComputation, 
 	var snapshots map[string]core.UsageSnapshot
 	cacheKey := ReadModelRequestKey(req)
 	if cached, cachedAt, cachedVersion, ok := s.rmCache.get(cacheKey); ok {
-		snapshots = cached
+		snapshots = s.maskUnpersistedClaudeQuota(cached, cachedVersion)
 		if shouldRefreshCachedReadModel(cachedAt, cachedVersion, s.dataVersion.Load(), time.Now()) {
 			s.refreshReadModelCacheAsync(s.serviceContext(ctx), cacheKey, req, 60*time.Second)
 		}
@@ -78,6 +78,7 @@ func (s *Service) computeActiveDetails(ctx context.Context) (activeComputation, 
 		if len(snapshots) > 0 {
 			s.rmCache.set(cacheKey, snapshots, computeVersion)
 		}
+		snapshots = s.maskUnpersistedClaudeQuota(snapshots, computeVersion)
 	}
 
 	input, byKey := buildActiveSelectionInput(snapshots, lastEvents, pinnedKey)

@@ -27,6 +27,22 @@ func TestPollScheduler_ShouldPoll_RespectsBaseInterval(t *testing.T) {
 	}
 }
 
+func TestPollScheduler_RemoteMinimumBoundsShortBaseInterval(t *testing.T) {
+	ps := newPollScheduler(time.Second)
+	if !ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("first poll should run")
+	}
+	ps.RecordPoll("claude", true)
+	ps.states["claude"].lastPollAt = time.Now().Add(-10 * time.Second)
+	if ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("remote minimum should prevent a premature fetch")
+	}
+	ps.states["claude"].lastPollAt = time.Now().Add(-31 * time.Second)
+	if !ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("remote poll should run after its minimum interval")
+	}
+}
+
 func TestPollScheduler_BackoffTiers(t *testing.T) {
 	ps := newPollScheduler(30 * time.Second)
 
@@ -182,6 +198,26 @@ func TestPollScheduler_RespectsRetryAfter(t *testing.T) {
 	*now = now.Add(61 * time.Second)
 	if !ps.ShouldPoll("acct1", false) {
 		t.Fatal("did not poll after Retry-After elapsed")
+	}
+}
+
+func TestPollScheduler_RemoteMinimumAndRetryAfter(t *testing.T) {
+	ps, now := newTestScheduler(time.Second)
+	ps.shouldPoll("claude", false, 30*time.Second)
+	ps.RecordPoll("claude", true)
+	ps.RecordOutcome("claude", core.UsageSnapshot{Status: core.StatusError, NextPollNotBefore: now.Add(time.Minute)})
+
+	*now = now.Add(29 * time.Second)
+	if ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("polled before minimum and retry-after")
+	}
+	*now = now.Add(time.Second)
+	if ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("minimum bypassed retry-after")
+	}
+	*now = now.Add(30 * time.Second)
+	if !ps.shouldPoll("claude", false, 30*time.Second) {
+		t.Fatal("did not poll after both delays elapsed")
 	}
 }
 

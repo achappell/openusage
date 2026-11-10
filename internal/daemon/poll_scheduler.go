@@ -73,6 +73,12 @@ func newPollScheduler(baseInterval time.Duration) *PollScheduler {
 // backoff tier. If the provider implements ChangeDetector, mark it accordingly
 // for the correct cap.
 func (ps *PollScheduler) ShouldPoll(accountID string, hasLocalDetector bool) bool {
+	return ps.shouldPoll(accountID, hasLocalDetector, 0)
+}
+
+// shouldPoll applies an optional minimum interval for remote sources whose
+// rate limit is stricter than the daemon's configured base interval.
+func (ps *PollScheduler) shouldPoll(accountID string, hasLocalDetector bool, minimum time.Duration) bool {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
@@ -90,6 +96,9 @@ func (ps *PollScheduler) ShouldPoll(accountID string, hasLocalDetector bool) boo
 		return false
 	}
 	interval := ps.effectiveIntervalLocked(state)
+	if interval < minimum {
+		interval = minimum
+	}
 	return now.Sub(state.lastPollAt) >= interval
 }
 
