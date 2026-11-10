@@ -1,6 +1,6 @@
 module github.com/janekbaraniewski/openusage
 
-go 1.26.6
+go 1.26.10
 
 require (
 	github.com/NimbleMarkets/ntcharts v0.5.1
@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/klauspost/compress v1.20.0
+	github.com/klauspost/compress v1.20.2
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/samber/lo v1.53.0
 	github.com/spf13/cobra v1.10.2
@@ -47,7 +47,7 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/zalando/go-keyring v0.2.7 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260811182544-a038080d80e5 // indirect

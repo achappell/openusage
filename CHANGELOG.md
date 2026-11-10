@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Update Go and dependencies to fix reported security vulnerabilities.
+
 ## 0.27.0 (2026-09-21)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
